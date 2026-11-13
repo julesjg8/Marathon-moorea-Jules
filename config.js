@@ -8,8 +8,8 @@ window.RACE = {
 
   // Prédiction marathon affichée par ta montre (Garmin ne la fournit pas via l'API).
   // Sur la montre : Statistiques de performance > Prédictions de course. Exemple : '3:52:10'
-  garminPredictedTime: '',
-  garminPredictedDate: '',     // date à laquelle tu l'as relevée, ex. '2026-11-09'
+  garminPredictedTime: '4:12:46',
+  garminPredictedDate: '2026-11-12',     // date à laquelle tu l'as relevée, ex. '2026-11-09'
 
   // Début du plan (lundi) et distance de ta première sortie longue
   planStart: '2026-11-09',
