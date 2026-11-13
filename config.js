@@ -6,10 +6,12 @@ window.RACE = {
   targetTime: '3:40:00',       // h:mm:ss
   peakLongRunKm: 32,           // sortie longue visée au pic de préparation
 
-  // Prédiction marathon affichée par ta montre (Garmin ne la fournit pas via l'API).
-  // Sur la montre : Statistiques de performance > Prédictions de course. Exemple : '3:52:10'
-  garminPredictedTime: '4:12:46',
-  garminPredictedDate: '2026-11-12',     // date à laquelle tu l'as relevée, ex. '2026-11-09'
+  // Prédictions marathon affichées par ta montre (Garmin ne les fournit pas via l'API).
+  // Sur la montre : Statistiques de performance > Prédictions de course.
+  // Ajoute une ligne à chaque relevé : ['date AAAA-MM-JJ', 'temps h:mm:ss'], (garde la virgule)
+  garminPredictions: [
+    // ['2026-11-12', '3:52:10'],
+  ],
 
   // Début du plan (lundi) et distance de ta première sortie longue
   planStart: '2026-11-09',

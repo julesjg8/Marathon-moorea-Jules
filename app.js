@@ -81,7 +81,13 @@ let predBasis = '≥ 10 km';
 if (!predPool.length) { predPool = inLast(runs, 84).filter((r) => r.distance >= 5000); predBasis = '≥ 5 km'; }
 const best = predPool.reduce((b, r) => (!b || riegel(r) < riegel(b) ? r : b), null);
 const predSec = best ? riegel(best) : NaN;
-const garminPred = R.garminPredictedTime ? parseTime(R.garminPredictedTime) : 0;
+const gpMap = new Map();
+(Array.isArray(R.garminPredictions) ? R.garminPredictions : []).forEach((p) => { if (Array.isArray(p) && /^\d{4}-\d{2}-\d{2}$/.test(p[0]) && parseTime(p[1]) > 0) gpMap.set(p[0], parseTime(p[1])); });
+if (R.garminPredictedTime && parseTime(R.garminPredictedTime) > 0) gpMap.set(/^\d{4}-\d{2}-\d{2}$/.test(R.garminPredictedDate || '') ? R.garminPredictedDate : '', parseTime(R.garminPredictedTime));
+const gpHist = [...gpMap].filter(([d]) => d).map(([d, t]) => ({ d: new Date(d + 'T00:00:00'), t })).sort((a, b) => a.d - b.d);
+const gpLast = gpHist[gpHist.length - 1];
+const garminPred = gpLast ? gpLast.t : gpMap.get('') || 0;
+const garminPredDate = gpLast ? gpLast.d : null;
 const LAPS = window.GARMIN_LAPS || {};
 const lapsOf = (r) => (LAPS[r.activityId] || []).map(([t, d, hr, mx, asc]) => ({ t, d, hr, mx, asc, pace: t / (d / 1000) }))
 .filter((l) => l.t >= 170 && l.d > 300 && l.hr >= 140 && !(l.asc > 15 * (l.d / 1000)));
@@ -552,7 +558,7 @@ ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv$
 </div>
 <div class="card hero-goal">
 <div class="goal-row"><span class="k">Temps visé</span><span class="v tnum">${fmtDur(targetSec)}</span></div>
-<div class="goal-row"><span class="k">Prédiction Garmin<br><span class="note">${garminPred ? (R.garminPredictedDate ? 'relevée le ' + fmtDate(new Date(R.garminPredictedDate + 'T00:00:00')) : 'saisie dans config.js') : 'non fournie par l\'API'}</span></span>
+<div class="goal-row"><span class="k">Prédiction Garmin<br><span class="note">${garminPred ? (garminPredDate ? 'relevée le ' + fmtDate(garminPredDate) : 'saisie dans config.js') : 'non fournie par l\'API'}</span></span>
 <span class="r"><span class="v tnum">${garminPred ? fmtDur(garminPred) : '–'}</span><br>
 ${garminPred ? deltaHtml(garminPred - targetSec) : '<span class="note">À renseigner dans config.js</span>'}</span></div>
 ${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><span class="note">seuil ${fmtPace(thr.fast)}-${fmtPace(thr.slow)}/km à ${fmt0(thrRef.hr)} bpm</span></span>
@@ -633,7 +639,12 @@ ${R.distanceKm > 21.0975 ? `<details class="raceplan"><summary>Mon plan de cours
 <div class="legend"><span><span class="sw" style="background:${V('series-1')}"></span>Allure moyenne de la sortie</span><span><span class="ln"></span>Allure marathon (${fmtPace(targetPace)})</span></div></div>
 ${hasPot ? `<div class="card span-6"><h2>Ton potentiel marathon</h2><div class="sub">D'après ta meilleure séance au seuil des 12 semaines précédentes · plus haut = plus rapide</div><div class="chart sm"><canvas id="cPot"></canvas></div>
 <div class="legend"><span><span class="sw" style="background:${V('series-1')}"></span>Potentiel</span><span><span class="ln"></span>Objectif (${goalTxt})</span></div></div>` : ''}
-<div class="card ${hasPot ? 'span-6' : 'span-12'}"><h2>Charge d'entraînement par semaine</h2><div class="sub">Tous sports confondus · charge Garmin</div><div class="chart sm"><canvas id="cLoad"></canvas></div></div>
+<div class="card span-6"><h2>Prédiction Garmin au fil du temps</h2><div class="sub">Temps marathon prédit par ta montre · plus haut = plus rapide</div>
+${gpHist.length >= 2 ? `<div class="chart sm"><canvas id="cGp"></canvas></div>
+<div class="legend"><span><span class="sw" style="background:${V('series-7')}"></span>Prédiction Garmin</span><span><span class="ln"></span>Objectif (${goalTxt})</span></div>
+<p class="note">Depuis le ${fmtDate(gpHist[0].d)} : ${(() => { const g = gpHist[0].t - gpLast.t; return Math.abs(g) < 30 ? 'stable' : `${g > 0 ? 'gagné' : 'perdu'} ${fmtDur(Math.abs(g))}`; })()} · dernière : ${fmtDur(gpLast.t)}, ${deltaHtml(gpLast.t - targetSec)}</p>`
+: `<p class="note">${gpHist.length ? `Une seule valeur pour l'instant (${fmtDur(gpHist[0].t)} le ${fmtDate(gpHist[0].d)}). La courbe apparaît dès la 2e.` : 'Aucune prédiction saisie.'} Ajoute une ligne dans <code>config.js</code>, dans <code>garminPredictions</code>, à chaque fois que tu relèves la prédiction sur ta montre.</p>`}</div>
+<div class="card ${hasPot ? 'span-12' : 'span-6'}"><h2>Charge d'entraînement par semaine</h2><div class="sub">Tous sports confondus · charge Garmin</div><div class="chart sm"><canvas id="cLoad"></canvas></div></div>
 </section>
 <details class="card recovery" id="recovery">
 <summary><b>Récupération</b><span class="tnum">VFC ${latestHrv?.lastNightAvg ?? '–'} ms · FC repos ${isFinite(rhr7) ? fmt0(rhr7) : '–'} bpm · Sommeil ${isFinite(sleep7) ? fmt1(sleep7) : '–'} h</span></summary>
@@ -744,6 +755,10 @@ mk('cPot', { type: 'line',
 data: { labels: potDates.map(fmtDM), datasets: [{ label: 'Potentiel', data: potVals, ...line(C.s1), pointRadius: 3 }, refLine(targetSec, potN, 'Objectif')] },
 options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ reverse: true, ticks: { color: C.muted, maxTicksLimit: 5, callback: (v) => fmtHMin(v) } }) },
 plugins: { tooltip: { filter: (i) => i.datasetIndex === 0, callbacks: { title: (it) => `Au ${fmtDM(potDates[it[0].dataIndex])}`, label: (c) => ` Potentiel marathon : ${fmtDur(c.raw)}` } } } } });
+if (gpHist.length >= 2) mk('cGp', { type: 'line',
+data: { labels: gpHist.map((p) => fmtDM(p.d)), datasets: [{ label: 'Prédiction Garmin', data: gpHist.map((p) => p.t), ...line(C.s7), pointRadius: 3 }, refLine(targetSec, gpHist.length, 'Objectif')] },
+options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ reverse: true, ticks: { color: C.muted, maxTicksLimit: 5, callback: (v) => fmtHMin(v) } }) },
+plugins: { tooltip: { filter: (i) => i.datasetIndex === 0, callbacks: { title: (it) => fmtDate(gpHist[it[0].dataIndex].d), label: (c) => ` Prédiction : ${fmtDur(c.raw)}` } } } } });
 mk('cLoad', { type: 'bar',
 data: { labels: weekLabels.map((l) => 'Sem. ' + l), datasets: [{ label: 'Charge', data: wLoad.map(Math.round), ...bar(C.s3) }] },
 options: { interaction: hover, scales: { x: weekX(), y: scaleY({ beginAtZero: true }) },
