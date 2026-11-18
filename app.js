@@ -7,30 +7,8 @@ if (!D || window.GARMIN_DATA_MISSING) {
 app.innerHTML = '<div class="wrap"><div class="empty"><h2>Données indisponibles</h2><p>Le fichier de données n\'a pas pu être chargé. Vérifie ta connexion, puis réessaie.</p><button type="button" class="btn primary" onclick="location.reload()">Réessayer</button></div></div>';
 return;
 }
-const DAY = 86400000;
-const V = (name) => `var(--${name})`;
-const readColors = () => { const cs = getComputedStyle(document.documentElement), g = (v) => cs.getPropertyValue('--' + v).trim();
-return { text: g('text'), text2: g('text-2'), muted: g('muted'), grid: g('grid'), axis: g('axis'), accent: g('accent'), s1: g('series-1'),
-s3: g('series-3'), s7: g('series-7'), serious: g('serious'), surface: g('surface'), tip: g('tip-bg'), band: g('band') }; };
-const parseLocal = (s) => new Date(String(s).replace(' ', 'T'));
-const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-const monday = (d) => { const x = startOfDay(d); const wd = (x.getDay() + 6) % 7; x.setDate(x.getDate() - wd); return x; };
-const fmtDM = (d) => d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-const fmtDate = (d) => d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
-const pad = (n) => String(n).padStart(2, '0');
-const fmtPace = (secPerKm) => { if (!isFinite(secPerKm) || secPerKm <= 0) return '–'; const s = Math.round(secPerKm); return `${Math.floor(s / 60)}:${pad(s % 60)}`; };
-const fmtDur = (sec) => { if (!isFinite(sec)) return '–'; const s = Math.round(sec); const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60); return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`; };
-const fmtHM = (sec) => { const m = Math.round(sec / 60); return m >= 60 ? `${Math.floor(m / 60)} h ${pad(m % 60)}` : `${m} min`; };
-const parseTime = (t) => t.split(':').map(Number).reduce((a, b) => a * 60 + b, 0);
-const km = (m) => (m || 0) / 1000;
-const fmt1 = (n) => (Math.round(n * 10) / 10).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-const fmt0 = (n) => Math.round(n).toLocaleString('fr-FR');
-const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : NaN;
-const clamp0 = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const noAccent = (s) => s.normalize('NFD').replace(/[^\x00-\x7F]/g, '');
+const { DAY, V, readColors, parseLocal, dayKey, startOfDay, addDays, monday, fmtDM, fmtDate, pad, fmtPace, fmtDur, fmtHM, parseTime, km, fmt1, fmt0, avg, clamp0, esc, noAccent } = window.U;
+// ===== 1. Données Garmin : activités, sommeil, FC repos, zones =====
 const seen = new Set();
 const activities = (D.activityPages || []).flat().filter((a) => a && a.activityId && !seen.has(a.activityId) && seen.add(a.activityId))
 .map((a) => ({ ...a, _date: parseLocal(a.startTimeLocal) }))
@@ -75,6 +53,7 @@ const weekLabels = weeks.map(fmtDM);
 const inLast = (arr, days) => arr.filter((a) => a._date >= addDays(today, -days + 1));
 const km28avg = inLast(prepRuns, 28).reduce((s, r) => s + km(r.distance), 0) / Math.min(4, NW);
 const long28 = inLast(prepRuns, 28).reduce((m, r) => Math.max(m, km(r.distance)), 0);
+// ===== 2. Forme actuelle : prédictions, seuil, allures d'entraînement =====
 const riegel = (r) => r.duration * Math.pow((R.distanceKm * 1000) / r.distance, 1.06);
 let predPool = inLast(runs, 84).filter((r) => r.distance >= 10000);
 let predBasis = '≥ 10 km';
@@ -170,6 +149,7 @@ const weekRuns = (mon) => runs.filter((r) => r._date >= mon && r._date < addDays
 const curWeekIdx = Math.max(0, Math.round((thisMon - planStartMon) / DAY / 7));
 const holdWeeks = new Set();
 for (let w = 0; w < curWeekIdx; w++) if (weekRuns(addDays(planStartMon, w * 7)).length < 2) holdWeeks.add(w + 1);
+// ===== 3. Plan d'entraînement, notes des séances et auto-régulation =====
 const SC = window.SessionScore;
 const levels = [];
 const adjustOf = (w) => {
@@ -248,6 +228,7 @@ const ring = (n) => `<span class="ring ${scCls(n)}" style="--p:${n}" role="img" 
 const fuelHtml = (s) => { const min = s.sec / 60; if ((s.type !== 'long' && s.type !== 'race') || min < 80) return '';
 const n = Math.floor((min - 1) / 40);
 return `<div class="fuel"><b>Ravitaillement</b> · ${n} gel${n > 1 ? 's' : ''} ou équivalent (20 à 25 g de glucides chacun) : un toutes les 40 min à partir de la 40e minute, avec quelques gorgées d'eau tous les quarts d'heure.${s.type === 'race' ? '' : ' Prends ce que tu utiliseras le jour J : l\'estomac s\'entraîne aussi.'}</div>`; };
+// ===== 4. Affichage des séances et des semaines =====
 const sessionCard = (s, forceOpen) => {
 const i = allSessions.indexOf(s);
 const isNext = s === nextSession;
@@ -272,6 +253,7 @@ ${profileHtml(s)}
 <span class="s-desc">${esc(s.desc)}</span>
 ${status}
 ${scoreBadge}
+${sc ? `<span class="s-sum">${esc(sc.summary)}</span>` : ''}
 ${hasSteps ? `<span class="s-more">${sc ? 'Analyse et étapes de la séance' : 'Étapes de la séance'}</span>` : ''}
 </button>
 ${hasSteps ? `<div class="s-steps" ${open ? '' : 'hidden'}>${scoreDetail}<ol>${stepsHtml(s.steps)}</ol>${r ? '' : fuelHtml(s)}
@@ -357,6 +339,7 @@ const miles = [
 const maxWeekKm = Math.max(...plan.weeks.filter((w) => w.weeksToRace > 0).map((w) => w.targetKm));
 const planListHtml = () => phases.map((p) => { const ws = plan.weeks.filter((w) => w.phase === p.key); if (!ws.length) return '';
 return `<div class="ph-head"><span class="sw" style="background:${p.color}"></span><b>${p.name}</b><span>${ws.length} semaine${ws.length > 1 ? 's' : ''} · du ${ws[0].monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} au ${new Date(Math.min(addDays(ws[ws.length - 1].monday, 6), raceDate)).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span></div>${ws.map(weekRow).join('')}`; }).join('');
+// ===== 5. Conseils du coach et forme du jour =====
 const prevMon = addDays(thisMon, -7), prevEnd = addDays(thisMon, -1);
 const inPrev = (a) => a._date >= prevMon && a._date < thisMon;
 const pRuns = runs.filter(inPrev), pOther = activities.filter((a) => inPrev(a) && !isRun(a));
@@ -407,9 +390,6 @@ for (let i = 0; i < 7; i++) { const h = hrvMap.get(dayKey(addDays(today, -i))); 
 return n; })();
 const yHard = activities.filter((a) => dayKey(a._date) === dayKey(addDays(today, -1)) && isHard(a));
 const signals = [];
-if (hrvT && hrvT.lastNightAvg) { const v = hrvT.lastNightAvg, lo = hrvT.baseline?.balancedLow, hi = hrvT.baseline?.balancedUpper;
-signals.push({ k: 'VFC', v: `${v} ms`, n: !(lo && hi) ? '' : hrvLowNights >= 3 ? `sous ta plage depuis ${hrvLowNights} nuits` : `plage ${lo}–${hi}`,
-lv: !lo ? 0 : Math.min(2, (v < lo - 5 ? 2 : v < lo ? 1 : 0) + (hrvLowNights >= 3 ? 1 : 0)) }); }
 if (rhrT) { const d = isFinite(rhrBase28) ? Math.round(rhrT - rhrBase28) : 0;
 signals.push({ k: 'FC repos', v: `${rhrT} bpm`, n: !isFinite(rhrBase28) ? '' : d ? `${Math.abs(d)} de ${d > 0 ? 'plus' : 'moins'} que d'habitude` : 'comme d\'habitude', lv: d >= 5 ? 2 : d >= 3 ? 1 : 0 }); }
 if (sleepSec) { const h = sleepSec / 3600; signals.push({ k: 'Sommeil', v: hm(h), n: '', lv: h < 6 ? 2 : h < 7 ? 1 : 0 }); }
@@ -446,14 +426,18 @@ const inDays = (d) => { const n = Math.round((d - today) / DAY); return n === 1 
 const todayCard = (() => {
 if (runToday) { const s = doneTodayS;
 return { title: s ? `Séance faite · ${esc(s.title)}` : 'Sortie faite',
-sub: `${fmt1(km(runToday.distance))} km en ${fmtDur(runToday.duration)} (${fmtPace(runToday.duration / km(runToday.distance))}/km)${s && s.score ? ` · note <b>${s.score.total}/100</b>, ${s.score.label.toLowerCase()}` : ''}`,
+sub: `${fmt1(km(runToday.distance))} km en ${fmtDur(runToday.duration)} (${fmtPace(runToday.duration / km(runToday.distance))}/km)${s && s.score ? ` · note <b>${s.score.total}/100</b>, ${s.score.label.toLowerCase()}<br>${esc(s.score.summary)}` : ''}`,
 btn: s ? `<button type="button" class="btn" data-goto="${allSessions.indexOf(s)}">Voir l'analyse</button>` : '' }; }
 if (todayS) { const kt = keyTarget(todayS);
 return { title: esc(todayS.title), sub: `${typeLabel[todayS.type]} · ≈ ${fmt1(todayS.km)} km · ${fmtHM(todayS.sec)}${kt ? ' · ' + kt : ''}`,
-btn: `<button type="button" class="btn primary" data-goto="${allSessions.indexOf(todayS)}">Voir la séance</button>` }; }
+btn: `<div class="today-btns"><button type="button" class="btn primary" data-goto="${allSessions.indexOf(todayS)}">Voir la séance</button>${canDownload && todayS.steps.length ? `<button type="button" class="btn fit-btn" data-sid="${allSessions.indexOf(todayS)}">⌚ Mettre sur ma montre</button>` : ''}</div>` }; }
 if (catchUp) return { title: 'Une séance à rattraper', sub: catchUp[0].toUpperCase() + catchUp.slice(1), btn: '' };
 return { title: 'Repos', sub: 'Pas de course prévue. Marche, mobilité ou 20 min de renforcement si tu as de l\'énergie.', btn: '' };
 })();
+const lastDone = allSessions.filter((s) => s.run && s.score && s.run._date < today).pop();
+const homeWeek = `<div class="home-week"><a href="#week" data-nav="week"><span>Semaine ${curWeek.index + 1}</span><b class="tnum">${fmt1(curWeek.doneKm)} / ${curWeek.targetKm} km</b></a>
+<a href="#week" data-nav="week"><span>Renfo</span><b class="tnum">${strengthN}/${STRENGTH_GOAL}</b></a>
+${lastDone ? `<button type="button" class="last" data-goto="${allSessions.indexOf(lastDone)}"><span>Dernière séance · ${esc(fmtDate(lastDone.run._date))}</span><b>${esc(lastDone.title)} · <span class="tnum">${lastDone.score.total}/100</span></b><small>${esc(lastDone.score.summary)}</small></button>` : ''}</div>`;
 const due = allSessions.filter((s) => s.type !== 'race' && (s.run || s.missed || s.late)), dueDone = due.filter((s) => s.run).length;
 const potN = clamp0(NW + 8, 12, 30);
 const potDates = Array.from({ length: potN }, (_, i) => { const d = addDays(thisMon, 6 - 7 * (potN - 1 - i)); return d > today ? today : d; });
@@ -541,6 +525,7 @@ const NAV = [
 ['plan', 'Plan', '<path d="M5 21V4h12l-2 4 2 4H5"/>'],
 ['stats', 'Stats', '<path d="M6 20v-8M12 20V4M18 20v-5"/>']
 ];
+// ===== 6. Construction de la page =====
 app.innerHTML = `
 <header class="top"><div class="top-in">
 <a class="brand" href="#today" data-nav="today"><span class="logo">42</span><span class="brand-t">Prépa Marathon</span><span class="dday tnum">J-${daysLeft}</span></a>
@@ -561,41 +546,11 @@ ${stale ? `<div class="banner"><b>Synchro en retard.</b> Les dernières données
 <p class="today-sub">${todayCard.sub}</p>
 ${upcoming ? `<p class="today-next">Ensuite : <b>${esc(upcoming.title)}</b> · ${upcoming.date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' })} (${inDays(upcoming.date)})</p>` : ''}
 ${todayCard.btn}
+${homeWeek}
 </div>
 <div class="ready lv${readyLv}">
 <div class="ready-head"><span class="light" aria-hidden="true">${['?', '✓', '!', '!!'][readyLv + 1]}</span><div><b>Forme du jour · ${readyTitle}</b><span>${readyAdvice}</span></div></div>
 ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv${x.lv}"><i>${x.lv ? '!' : '✓'}</i><span>${x.k} <b class="tnum">${esc(x.v)}</b>${x.n ? ` · ${x.n}` : ''}</span></span>`).join('')}</div>` : ''}
-</div>
-</section>
-<section class="hero">
-<div class="card">
-<div class="eyebrow">Objectif</div>
-<h2 class="hero-title">${esc(R.name)} · ${raceDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
-<div class="hero-sub">${R.distanceKm.toLocaleString('fr-FR')} km en ${goalTxt}</div>
-<div class="countdown">
-<div><div class="v tnum">${daysLeft}</div><div class="l">jours restants</div></div>
-<div><div class="v tnum">${weeksLeft}</div><div class="l">semaines</div></div>
-<div><div class="v tnum">${fmtPace(targetPace)}</div><div class="l">allure cible /km</div></div>
-</div>
-<div class="phase-pill">Phase actuelle : <b>${current.name}</b> · semaine ${curWeek.index + 1} sur ${plan.weeks.length}</div>
-<div class="progress" title="Avancement de la préparation"><span style="width:${pct(today).toFixed(1)}%"></span></div>
-</div>
-<div class="card hero-goal">
-<div class="goal-row"><span class="k">Temps visé</span><span class="v tnum">${fmtDur(targetSec)}</span></div>
-<div class="goal-row"><span class="k">Prédiction Garmin<br><span class="note">${garminPred ? (garminPredDate ? 'relevée le ' + fmtDate(garminPredDate) : 'saisie dans config.js') : 'non fournie par l\'API'}</span></span>
-<span class="r"><span class="v tnum">${garminPred ? fmtDur(garminPred) : '–'}</span><br>
-${garminPred ? deltaHtml(garminPred - targetSec) : '<span class="note">À renseigner dans config.js</span>'}</span></div>
-${gpHist.length ? `<div class="gp-hist" aria-label="Suivi de la prédiction Garmin">${gpHist.slice(-6).map((p, i, a) => { const prev = i ? a[i - 1].t : (gpHist.length > a.length ? gpHist[gpHist.length - a.length - 1].t : null); const g = prev != null ? prev - p.t : null;
-return `<span class="gp"><span>${fmtDM(p.d)}</span><b class="tnum">${fmtDur(p.t)}</b>${g == null ? '<i>1er relevé</i>' : `<i class="${g >= 0 ? 'ok' : 'ko'}">${Math.abs(g) < 5 ? 'stable' : `${g > 0 ? '−' : '+'}${fmtDur(Math.abs(g))}`}</i>`}</span>`; }).join('')}</div>
-<p class="note">Nouveau relevé ? Dis-le à Claude ou ajoute une ligne dans <code>config.js</code> (<code>garminPredictions</code>).</p>` : ''}
-${semiHtml}
-${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><span class="note">seuil ${fmtPace(thr.fast)}-${fmtPace(thr.slow)}/km à ${fmt0(thrRef.hr)} bpm</span></span>
-<span class="r"><span class="v tnum">${fmtDur(thrPotential)}</span><br>${deltaHtml(thrPotential - targetSec)}</span></div>`
-: `<div class="goal-row"><span class="k">Estimation Riegel<br><span class="note">${best ? `${fmt1(km(best.distance))} km en ${fmtDur(best.duration)}, ${fmtDate(best._date)}` : 'pas de sortie ≥ 10 km'}</span></span>
-<span class="r"><span class="v tnum">${isFinite(predSec) ? fmtDur(predSec) : '–'}</span><br>${isFinite(predSec) ? deltaHtml(predDelta) : ''}</span></div>`}
-<div class="note">${!thr ? `Pour ${goalTxt}, il faut valoir environ ${fmtDur(goal10)} sur 10 km.`
-: thrPotential <= targetSec ? `Ta vitesse est déjà celle d'un marathon en ${goalTxt}. Ce qu'il reste à construire, c'est l'endurance pour la tenir 42 km.`
-: `Ta vitesse au seuil vaut aujourd'hui un marathon en ${fmtDur(thrPotential)}. Il reste de la vitesse à gagner, puis l'endurance pour la tenir 42 km.`}</div>
 </div>
 </section>
 <section class="card">
@@ -655,7 +610,38 @@ ${R.distanceKm > 21.0975 ? `<details class="raceplan"><summary>Mon plan de cours
 <div class="wk-list">${planListHtml()}</div>
 <p class="note">Le plan s'ajuste à ce que tu cours vraiment. Les allures suivent ton seuil, mesuré sur tes séances des 12 dernières semaines. Une séance compte même si tu la changes de jour dans la semaine. Une semaine terminée avec moins de 2 sorties fait répéter la semaine suivante au lieu de l'allonger. La sortie longue est plafonnée à 3 h 15 d'effort, soit ${plan.maxLongKm} km à ton allure actuelle.</p>
 </section>
-<section class="grid" id="stats">
+<section class="hero" id="stats">
+<div class="card">
+<div class="eyebrow">Objectif</div>
+<h2 class="hero-title">${esc(R.name)} · ${raceDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
+<div class="hero-sub">${R.distanceKm.toLocaleString('fr-FR')} km en ${goalTxt}</div>
+<div class="countdown">
+<div><div class="v tnum">${daysLeft}</div><div class="l">jours restants</div></div>
+<div><div class="v tnum">${weeksLeft}</div><div class="l">semaines</div></div>
+<div><div class="v tnum">${fmtPace(targetPace)}</div><div class="l">allure cible /km</div></div>
+</div>
+<div class="phase-pill">Phase actuelle : <b>${current.name}</b> · semaine ${curWeek.index + 1} sur ${plan.weeks.length}</div>
+<div class="progress" title="Avancement de la préparation"><span style="width:${pct(today).toFixed(1)}%"></span></div>
+</div>
+<div class="card hero-goal">
+<div class="goal-row"><span class="k">Temps visé</span><span class="v tnum">${fmtDur(targetSec)}</span></div>
+<div class="goal-row"><span class="k">Prédiction Garmin<br><span class="note">${garminPred ? (garminPredDate ? 'relevée le ' + fmtDate(garminPredDate) : 'saisie dans config.js') : 'non fournie par l\'API'}</span></span>
+<span class="r"><span class="v tnum">${garminPred ? fmtDur(garminPred) : '–'}</span><br>
+${garminPred ? deltaHtml(garminPred - targetSec) : '<span class="note">À renseigner dans config.js</span>'}</span></div>
+${gpHist.length ? `<div class="gp-hist" aria-label="Suivi de la prédiction Garmin">${gpHist.slice(-6).map((p, i, a) => { const prev = i ? a[i - 1].t : (gpHist.length > a.length ? gpHist[gpHist.length - a.length - 1].t : null); const g = prev != null ? prev - p.t : null;
+return `<span class="gp"><span>${fmtDM(p.d)}</span><b class="tnum">${fmtDur(p.t)}</b>${g == null ? '<i>1er relevé</i>' : `<i class="${g >= 0 ? 'ok' : 'ko'}">${Math.abs(g) < 5 ? 'stable' : `${g > 0 ? '−' : '+'}${fmtDur(Math.abs(g))}`}</i>`}</span>`; }).join('')}</div>
+<p class="note">Nouveau relevé ? Dis-le à Claude ou ajoute une ligne dans <code>config.js</code> (<code>garminPredictions</code>).</p>` : ''}
+${semiHtml}
+${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><span class="note">seuil ${fmtPace(thr.fast)}-${fmtPace(thr.slow)}/km à ${fmt0(thrRef.hr)} bpm</span></span>
+<span class="r"><span class="v tnum">${fmtDur(thrPotential)}</span><br>${deltaHtml(thrPotential - targetSec)}</span></div>`
+: `<div class="goal-row"><span class="k">Estimation Riegel<br><span class="note">${best ? `${fmt1(km(best.distance))} km en ${fmtDur(best.duration)}, ${fmtDate(best._date)}` : 'pas de sortie ≥ 10 km'}</span></span>
+<span class="r"><span class="v tnum">${isFinite(predSec) ? fmtDur(predSec) : '–'}</span><br>${isFinite(predSec) ? deltaHtml(predDelta) : ''}</span></div>`}
+<div class="note">${!thr ? `Pour ${goalTxt}, il faut valoir environ ${fmtDur(goal10)} sur 10 km.`
+: thrPotential <= targetSec ? `Ta vitesse est déjà celle d'un marathon en ${goalTxt}. Ce qu'il reste à construire, c'est l'endurance pour la tenir 42 km.`
+: `Ta vitesse au seuil vaut aujourd'hui un marathon en ${fmtDur(thrPotential)}. Il reste de la vitesse à gagner, puis l'endurance pour la tenir 42 km.`}</div>
+</div>
+</section>
+<section class="grid">
 <div class="card span-8"><h2>Volume de course par semaine</h2><div class="sub">Depuis le début de la prépa · km</div><div class="chart"><canvas id="cKm"></canvas></div></div>
 <div class="card span-4"><h2>Zones cardiaques · 28 jours</h2><div class="sub">Temps passé en course</div>
 <div class="zones">${zoneSec.map((s, i) => `<div style="flex:${s || 0} 0 0;background:${zoneColors[i]}" title="${zoneNames[i]} : ${zoneTotal ? Math.round((s / zoneTotal) * 100) : 0} %"></div>`).join('')}</div>
@@ -740,6 +726,7 @@ plugins: { tooltip: { callbacks: { label: (c) => ` ${hm(c.raw)}` } } } } });
 const recoveryEl = document.getElementById('recovery');
 const show = (key) => { if (!C || drawn.has(key)) return; drawn.add(key); if (key === 'recovery') drawRecovery(); else drawCmp(key); };
 const paceRuns = inLast(prepRuns, 84).filter((r) => !(r.elevationGain > 25 * km(r.distance)));
+// ===== 7. Graphiques et interactions (onglets, thème, boutons) =====
 const drawCharts = (animate) => {
 if (!window.Chart) return;
 charts.forEach((c) => c.destroy()); charts = []; drawn.clear();

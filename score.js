@@ -52,6 +52,7 @@ const zones = [1, 2, 3, 4, 5].map((z) => run['hrTimeInZone_' + z] || 0);
 const zoneTot = zones.reduce((a, b) => a + b, 0);
 const hilly = run.elevationGain > 15 * runKm;
 const parts = [];
+const tips = {}; // une phrase « à retenir » par critère, utilisée pour le bilan
 let approx = !laps.length;
 const facts = { easy: zoneTot ? (zones[0] + zones[1]) / zoneTot : null, hard: zoneTot ? zones[3] + zones[4] : null };
 const W = paced.reduce((s, x) => s + stepSec(x), 0);
@@ -65,6 +66,7 @@ if (volRatio > 1.2) volPts *= clamp(1 - (volRatio - 1.2) / 0.4, 0.5, 1);
 parts.push({ key: 'vol', name: 'Volume', pts: volPts, max: 15,
 txt: (timeBased ? `${fmtMin(run.duration)} sur ${fmtMin(session.sec)} prévues` : `${runKm.toFixed(1).replace('.', ',')} km sur ${String(session.km).replace('.', ',')} prévus`)
 + (volRatio > 1.2 ? ' : nettement plus que prévu' : volRatio < 0.85 ? ' : séance écourtée' : '') });
+tips.vol = volRatio < 1 ? 'séance écourtée : vise la durée prévue, quitte à ralentir' : 'plus long que prévu : respecte le volume, c\'est la récupération qui fait progresser';
 
 // Tours de travail : ceux qui tournent à l'allure des blocs (ou plus vite).
 let work = [], workSteps = paced;
@@ -114,6 +116,7 @@ pts = 0.6 * pts + 0.4 * ef;
 extra = ` · endurance à ${fmtPace(ep)}/km (cible ${fmtPace(r.fast)}-${fmtPace(r.slow)})`;
 }
 }
+tips.pace = p < fast - 3 ? `blocs trop rapides (${fmtPace(p)}/km) : reste dans ${fmtPace(fast)}-${fmtPace(slow)}, même si c'est facile` : p > slow + 3 ? `blocs trop lents (${fmtPace(p)}/km) : vise ${fmtPace(fast)}-${fmtPace(slow)}` : t < W * 0.85 ? 'blocs écourtés : termine toutes les répétitions prévues' : `allure irrégulière : cale-toi sur ${fmtPace(fast)}-${fmtPace(slow)} dès le début du bloc`;
 const off = p < fast - 3 ? ` : ${Math.round(fast - p)} s trop rapide` : p > slow + 3 ? ` : ${Math.round(p - slow)} s trop lent` : '';
 parts.push({ key: 'pace', name: 'Allure', pts: 25 * pts, max: 25,
 txt: `${fmtMin(t)} de travail sur ${fmtMin(W)} prévues, à ${fmtPace(p)}/km pour ${fmtPace(fast)}-${fmtPace(slow)}${off} · ${pct(inRange)} du temps dans la cible${extra}` });
@@ -147,6 +150,7 @@ const worst = gs.slice().sort((a, b) => a.fit - b.fit)[0];
 const txt = gs.map((g) => `${stepLabel[g.name] || g.name.toLowerCase()} à ${Math.round(g.hr)} bpm (cible ${g.b.txt})`).join(' · ')
 + (worst.fit < 0.8 ? (worst.b.hi && worst.hr > worst.b.hi ? ' : trop haut, l\'effort était plus dur que prévu' : ' : trop bas, effort trop retenu') : '');
 parts.push({ key: 'heart', name: 'Cardio', pts: 25 * fit, max: 25, txt });
+tips.heart = worst.b.hi && worst.hr > worst.b.hi ? `${stepLabel[worst.name] || worst.name.toLowerCase()} à ${Math.round(worst.hr)} bpm, trop haut : ralentis pour rester ${worst.b.txt.split(',')[0]}` : `${stepLabel[worst.name] || worst.name.toLowerCase()} à ${Math.round(worst.hr)} bpm : tu peux appuyer un peu plus`;
 } else if (zoneTot) {
 if (!laps.length) approx = true;
 if (paced.length && session.type !== 'long') {
@@ -170,6 +174,7 @@ const sd = Math.sqrt(tw(reps, (l) => (l.pace - m) ** 2));
 const n = Math.max(1, Math.floor(reps.length / 3));
 const fade = paceOf(reps.slice(-n)) - paceOf(reps.slice(0, n));
 const pts = clamp(1 - Math.max(0, sd - 4) / 14, 0, 1) * clamp(1 - Math.max(0, fade - 4) / 12, 0, 1);
+tips.reg = fade > 4 ? `dernières répétitions ${Math.round(fade)} s plus lentes : pars un peu moins vite` : 'répétitions irrégulières : même chrono pour chacune';
 parts.push({ key: 'reg', name: 'Régularité', pts: 15 * pts, max: 15,
 txt: `écart de ± ${Math.round(sd)} s/km entre les répétitions${fade > 4 ? `, les dernières ${Math.round(fade)} s plus lentes que les premières` : fade < -6 ? ', finies plus vite : bien géré' : ', allure tenue jusqu\'au bout'}` });
 } else if (session.type === 'long' || session.type === 'easy') {
@@ -182,6 +187,7 @@ let c = 0; const h1 = [], h2 = [];
 mov.forEach((l) => { (c < tot / 2 ? h1 : h2).push(l); c += l.t; });
 const drift = 1 - eff(h2) / eff(h1);
 facts.drift = drift;
+tips.reg = `dérive cardiaque de ${pct(drift)} : pars plus doucement et bois régulièrement`;
 parts.push({ key: 'reg', name: 'Régularité', pts: 15 * clamp(1 - (drift - 0.04) / 0.08, 0, 1), max: 15,
 txt: `dérive cardiaque ${drift <= 0 ? 'nulle' : pct(drift)} entre la 1re et la 2e moitié${session.type === 'long' ? ' (hors blocs)' : ''} (bon : moins de 4 %)` });
 }
@@ -194,6 +200,7 @@ const ref = paced.length && session.type !== 'long' ? (facts.work && facts.work.
 : run.averageHR ? { p: runPace, hr: run.averageHR } : null;
 if (ref && ref.hr > 0) {
 const expected = ctx.paceAtHr(ref.hr), delta = (expected - ref.p) / expected;
+tips.eff = 'plus lent que d\'habitude à cette FC : fatigue, chaleur ou manque de sommeil, rien d\'inquiétant sur une séance';
 parts.push({ key: 'eff', name: 'Efficacité', pts: clamp(14 + delta * (delta > 0 ? 120 : 140), 0, 20), max: 20,
 txt: `${fmtPace(ref.p)}/km à ${Math.round(ref.hr)} bpm, contre ${fmtPace(expected)}/km d'habitude à cette FC` });
 }
@@ -202,7 +209,10 @@ txt: `${fmtPace(ref.p)}/km à ${Math.round(ref.hr)} bpm, contre ${fmtPace(expect
 const max = parts.reduce((s, p) => s + p.max, 0);
 const total = Math.round((parts.reduce((s, p) => s + p.pts, 0) / max) * 100);
 parts.forEach((p) => { p.pts = Math.round(p.pts); });
-return { total, label: label(total), parts, approx, facts };
+// Bilan en une phrase : le critère le plus faible, s'il est sous 80 %.
+const weak = parts.filter((p) => p.pts / p.max < 0.8 && tips[p.key]).sort((a, b) => a.pts / a.max - b.pts / b.max)[0];
+const summary = weak ? `À retenir : ${tips[weak.key]}.` : 'Séance réussie : rien à corriger.';
+return { total, label: label(total), parts, approx, facts, summary };
 }
 const label = (n) => (n >= 85 ? 'Excellente' : n >= 70 ? 'Bonne' : n >= 50 ? 'Moyenne' : 'À revoir');
 function weekScore(sessions) {
