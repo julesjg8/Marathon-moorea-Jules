@@ -207,14 +207,10 @@ w.doneCount = w.sessions.filter((s) => s.run).length;
 w.score = SC ? SC.weekScore(w.sessions) : null;
 });
 return plan; };
-// Fatigue : VFC sous la plage normale au moins 3 nuits sur la semaine précédente → jamais de durcissement.
-const tiredBefore = (mon) => Array.from({ length: 7 }, (_, i) => hrvMap.get(dayKey(addDays(mon, -7 + i))))
-.filter((h) => h && h.lastNightAvg && h.baseline?.balancedLow && h.lastNightAvg < h.baseline.balancedLow).length >= 3;
 if (SC) for (let w = 0; w <= curWeekIdx; w++) {
 const p = buildPlan();
 levels[w] = SC.decide(p.weeks.slice(Math.max(0, w - 3), w).map((x) => x.score).filter(Boolean));
 if (levels[w].level > 0 && w > 0 && levels[w - 1].level > 0) { levels[w].level = 0; levels[w].capped = true; }
-if (levels[w].level > 0 && tiredBefore(addDays(planStartMon, w * 7))) { levels[w].level = 0; levels[w].tired = true; }
 }
 const plan = buildPlan();
 const regul = levels.length ? levels[levels.length - 1] : { level: 0, force: false, avg: null, n: 0 };
@@ -291,7 +287,6 @@ curWeek.weeksToRace < 3 ? 'c\'est l\'affûtage : le programme ne change plus, pl
 : curWeek.recovery ? 'semaine <b>allégée</b>, déjà prévue au plan.'
 : regul.level > 0 ? 'programme <b>durci</b> d\'un cran (sortie longue +3 km, séance de qualité plus longue).'
 : regul.level < 0 ? 'programme <b>adouci</b> d\'un cran (sortie longue +1 km, séance de qualité plus courte).'
-: regul.tired ? 'tes notes sont bonnes, mais ta VFC est restée basse la semaine dernière : programme <b>maintenu</b>, pas de durcissement tant que tu récupères mal.'
 : regul.capped ? 'la semaine dernière était déjà durcie : celle-ci reste <b>normale</b> (une semaine durcie sur deux au maximum).'
 : 'programme <b>maintenu</b> tel quel.'}`;
 const when = (d) => (+d === +today ? 'aujourd\'hui' : +d === +addDays(today, 1) ? 'demain' : d.toLocaleDateString('fr-FR', { weekday: 'long' }));
@@ -364,12 +359,11 @@ const otherTxt = [...new Set(pOther.map((a) => sportName[a.activityType?.typeKey
 const hm = (h) => { const m = Math.round(h * 60); return `${Math.floor(m / 60)} h ${pad(m % 60)}`; };
 const z2Txt = hrEasy ? `${hrEasy.lo}-${hrEasy.hi} bpm` : 'zone 2';
 const recoveryTip = (() => {
-if (pHrvLow >= 3) return { t: `Ta VFC est restée sous ta plage normale ${pHrvLow} nuits sur ${pHrv.length}.`, d: 'C\'est le signe d\'une fatigue qui s\'installe. Si elle n\'est pas remontée le matin de ta séance de qualité, remplace-la par le footing de 45 min et décale la qualité de deux jours.' };
 if (isFinite(pRhr) && isFinite(baseRhr) && pRhr - baseRhr >= 4) return { t: `Ta FC au repos est montée à ${fmt0(pRhr)} bpm, contre ${fmt0(baseRhr)} d'habitude.`, d: 'Fatigue, manque de sommeil ou début de virus. Garde tes footings vraiment faciles cette semaine et ne force pas la séance de qualité si les jambes sont lourdes.' };
 if (pSleep.length >= 4 && avg(pSleep) < 7) return { t: `Tu as dormi ${hm(avg(pSleep))} par nuit en moyenne.`, d: 'C\'est trop peu pour assimiler l\'entraînement. Vise 30 à 45 min de plus, en priorité la veille de la séance de qualité et de la sortie longue.' };
 if (backToBack) return { t: 'Tu as enchaîné deux journées intenses de suite.', d: 'Laisse au moins un jour facile ou de repos entre deux efforts durs, tous sports confondus. C\'est le jour facile qui fait progresser.' };
 if (pOther.filter(isHard).length >= 2) return { t: `${pOther.length} séances hors course la semaine dernière (${otherTxt}).`, d: 'Compte les plus intenses comme des séances dures : garde 48 h entre elles et la sortie longue, sinon tu la courras déjà fatigué.' };
-return { t: `Signaux au vert${pSleep.length ? ` : ${hm(avg(pSleep))} de sommeil par nuit` : ''}${pHrv.length ? `, VFC à ${fmt0(avg(pHrv.map((h) => h.lastNightAvg)))} ms dans ta plage` : ''}.`, d: 'Protège cet état : une journée complète sans sport le lendemain de la sortie longue, et mange dans l\'heure qui suit tes séances de plus d\'une heure.' };
+return { t: `Signaux au vert${pSleep.length ? ` : ${hm(avg(pSleep))} de sommeil par nuit` : ''}.`, d: 'Protège cet état : une journée complète sans sport le lendemain de la sortie longue, et mange dans l\'heure qui suit tes séances de plus d\'une heure.' };
 })();
 const trainingTip = (() => {
 if (!pRuns.length) return { t: `Aucune course la semaine dernière${lastRun && lastRun._date < prevMon ? ` : ta dernière sortie datait du ${fmtDate(lastRun._date).replace(/\.$/, '')}` : ''}.`, d: `Reprends avec les 3 séances prévues, sans chercher à rattraper. Sur la séance de qualité, reste à ${fmtPace(paces.threshold.fast)}-${fmtPace(paces.threshold.slow)}/km même si ça paraît facile : tes jambes ont perdu un peu de rythme.` };

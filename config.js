@@ -11,6 +11,7 @@ window.RACE = {
   // Ajoute une ligne à chaque relevé : ['date AAAA-MM-JJ', 'temps h:mm:ss'], (garde la virgule)
   garminPredictions: [
     ['2026-11-12', '4:12:46'],
+    ['2026-11-17', '4:14:54'],
   ],
 
   // Début du plan (lundi) et distance de ta première sortie longue
