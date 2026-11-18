@@ -140,10 +140,11 @@ const lv = adj.level || 0;
 const scheduledRecovery = weeksToRace >= 3 && !hold && prog % 4 === 3;
 const forced = weeksToRace >= 3 && !hold && !scheduledRecovery && !!adj.force;
 const recovery = scheduledRecovery || forced;
+const lvEff = recovery || weeksToRace < 3 ? 0 : lv;
 let longKm;
 if (weeksToRace >= 3) {
 const cap = Math.min(maxLongKm, phase === 'base' ? 22 : phase === 'build' ? 28 : o.peakLongRunKm);
-const inc = 2 + lv;
+const inc = 2 + lvEff;
 if (recovery) { longKm = Math.round(lastLong * 0.75); prevWasCap = false; }
 else if (hold) longKm = Math.min(cap, lastLong);
 else if (lastLong + inc > cap) {
@@ -159,7 +160,7 @@ let q;
 if (weeksToRace <= 2) q = taperQ(weeksToRace);
 else if (test === '10k') q = test10k();
 else if (recovery || test === 'half') q = light();
-else { const list = lib[phase] || lib.peak; const i = hold ? Math.max(0, used[phase] - 1) : used[phase]++; q = tune(list[i % list.length], lv); }
+else { const list = lib[phase] || lib.peak; const i = hold ? Math.max(0, used[phase] - 1) : used[phase]++; q = tune(list[i % list.length], lvEff); }
 const sessions = [];
 const push = (dow, s) => sessions.push({ ...s, date: addDays(mon, dow) });
 push(qDow, { type: 'quality', ...q });
@@ -175,7 +176,7 @@ sessions.forEach((s) => { if (s.type === 'quality' && s.date >= o.raceDate) s.da
 }
 sessions.forEach((s) => { const e = estimate(s.steps); s.km = s.fixedKm || Math.round(e.km * 10) / 10; s.sec = s.fixedSec || e.sec; });
 sessions.sort((a, b) => a.date - b.date);
-weeks.push({ index: w, monday: mon, weeksToRace, phase, recovery, hold, longKm, test, level: lv, forced,
+weeks.push({ index: w, monday: mon, weeksToRace, phase, recovery, hold, longKm, test, level: lvEff, forced,
 targetKm: Math.round(sessions.reduce((a, x) => a + x.km, 0)), sessions });
 }
 return { weeks, maxLongKm, ranges: { easy: easyR, long: longR, sout: soutR, mp: mpR, half: halfR } };

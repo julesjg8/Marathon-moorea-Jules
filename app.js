@@ -172,12 +172,12 @@ const SC = window.SessionScore;
 const levels = [];
 const adjustOf = (w) => {
 if (w < levels.length) return levels[w];
-const last = levels.length - 1, lv = last >= 0 ? levels[last].level : 0;
-return { level: lv > 0 && (w - last) % 2 === 1 ? 0 : lv, force: false };
+return { level: 0, force: false };
 };
 const scoreMemo = new Map();
+let curRanges = null;
 const scoreOf = (s, r) => { if (!SC) return null; const k = `${r.activityId}|${s.title}|${s.km}|${Math.round(s.sec)}`;
-if (!scoreMemo.has(k)) scoreMemo.set(k, SC.score(s, r, LAPS[r.activityId], { paceAtHr })); return scoreMemo.get(k); };
+if (!scoreMemo.has(k)) scoreMemo.set(k, SC.score(s, r, LAPS[r.activityId], { paceAtHr, zones: runZones, ranges: curRanges })); return scoreMemo.get(k); };
 const fitOf = (s, r) => { const sc = scoreOf(s, r);
 return (sc ? sc.total : 50) - Math.min(60, 35 * Math.abs(Math.log(r.duration / s.sec))) + (dayKey(r._date) === dayKey(s.date) ? 12 : 0); };
 const pairUp = (sessions, pool) => { let best = { v: -1, pick: [] };
@@ -192,6 +192,7 @@ planStart: planStartMon, raceDate, goalPace: targetPace, raceKm: R.distanceKm, p
 startLongKm: R.startLongKm || 12, longRunDay: R.longRunDay || 'SUNDAY',
 paces, easyPace, longPace, hrEasy, phaseOf: phaseAt, holdWeeks, adjust: SC ? adjustOf : null
 });
+curRanges = plan.ranges;
 plan.weeks.forEach((w) => {
 const all = weekRuns(w.monday), over = addDays(w.monday, 7) <= today;
 const pick = all.length ? pairUp(w.sessions, all) : [];
@@ -206,10 +207,14 @@ w.doneCount = w.sessions.filter((s) => s.run).length;
 w.score = SC ? SC.weekScore(w.sessions) : null;
 });
 return plan; };
+// Fatigue : VFC sous la plage normale au moins 3 nuits sur la semaine précédente → jamais de durcissement.
+const tiredBefore = (mon) => Array.from({ length: 7 }, (_, i) => hrvMap.get(dayKey(addDays(mon, -7 + i))))
+.filter((h) => h && h.lastNightAvg && h.baseline?.balancedLow && h.lastNightAvg < h.baseline.balancedLow).length >= 3;
 if (SC) for (let w = 0; w <= curWeekIdx; w++) {
 const p = buildPlan();
 levels[w] = SC.decide(p.weeks.slice(Math.max(0, w - 3), w).map((x) => x.score).filter(Boolean));
 if (levels[w].level > 0 && w > 0 && levels[w - 1].level > 0) { levels[w].level = 0; levels[w].capped = true; }
+if (levels[w].level > 0 && tiredBefore(addDays(planStartMon, w * 7))) { levels[w].level = 0; levels[w].tired = true; }
 }
 const plan = buildPlan();
 const regul = levels.length ? levels[levels.length - 1] : { level: 0, force: false, avg: null, n: 0 };
@@ -286,6 +291,7 @@ curWeek.weeksToRace < 3 ? 'c\'est l\'affûtage : le programme ne change plus, pl
 : curWeek.recovery ? 'semaine <b>allégée</b>, déjà prévue au plan.'
 : regul.level > 0 ? 'programme <b>durci</b> d\'un cran (sortie longue +3 km, séance de qualité plus longue).'
 : regul.level < 0 ? 'programme <b>adouci</b> d\'un cran (sortie longue +1 km, séance de qualité plus courte).'
+: regul.tired ? 'tes notes sont bonnes, mais ta VFC est restée basse la semaine dernière : programme <b>maintenu</b>, pas de durcissement tant que tu récupères mal.'
 : regul.capped ? 'la semaine dernière était déjà durcie : celle-ci reste <b>normale</b> (une semaine durcie sur deux au maximum).'
 : 'programme <b>maintenu</b> tel quel.'}`;
 const when = (d) => (+d === +today ? 'aujourd\'hui' : +d === +addDays(today, 1) ? 'demain' : d.toLocaleDateString('fr-FR', { weekday: 'long' }));
@@ -331,7 +337,7 @@ const miles = [
 ].filter(([s]) => s && s.date >= today).map(([s, label]) => ({ date: s.date, label })).sort((a, b) => a.date - b.date);
 const maxWeekKm = Math.max(...plan.weeks.filter((w) => w.weeksToRace > 0).map((w) => w.targetKm));
 const planListHtml = () => phases.map((p) => { const ws = plan.weeks.filter((w) => w.phase === p.key); if (!ws.length) return '';
-return `<div class="ph-head"><span class="sw" style="background:${p.color}"></span><b>${p.name}</b><span>${ws.length} semaine${ws.length > 1 ? 's' : ''} · du ${ws[0].monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} au ${addDays(ws[ws.length - 1].monday, 6).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span></div>${ws.map(weekRow).join('')}`; }).join('');
+return `<div class="ph-head"><span class="sw" style="background:${p.color}"></span><b>${p.name}</b><span>${ws.length} semaine${ws.length > 1 ? 's' : ''} · du ${ws[0].monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })} au ${new Date(Math.min(addDays(ws[ws.length - 1].monday, 6), raceDate)).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span></div>${ws.map(weekRow).join('')}`; }).join('');
 const prevMon = addDays(thisMon, -7), prevEnd = addDays(thisMon, -1);
 const inPrev = (a) => a._date >= prevMon && a._date < thisMon;
 const pRuns = runs.filter(inPrev), pOther = activities.filter((a) => inPrev(a) && !isRun(a));
@@ -561,6 +567,9 @@ ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv$
 <div class="goal-row"><span class="k">Prédiction Garmin<br><span class="note">${garminPred ? (garminPredDate ? 'relevée le ' + fmtDate(garminPredDate) : 'saisie dans config.js') : 'non fournie par l\'API'}</span></span>
 <span class="r"><span class="v tnum">${garminPred ? fmtDur(garminPred) : '–'}</span><br>
 ${garminPred ? deltaHtml(garminPred - targetSec) : '<span class="note">À renseigner dans config.js</span>'}</span></div>
+${gpHist.length ? `<div class="gp-hist" aria-label="Suivi de la prédiction Garmin">${gpHist.slice(-6).map((p, i, a) => { const prev = i ? a[i - 1].t : (gpHist.length > a.length ? gpHist[gpHist.length - a.length - 1].t : null); const g = prev != null ? prev - p.t : null;
+return `<span class="gp"><span>${fmtDM(p.d)}</span><b class="tnum">${fmtDur(p.t)}</b>${g == null ? '<i>1er relevé</i>' : `<i class="${g >= 0 ? 'ok' : 'ko'}">${Math.abs(g) < 5 ? 'stable' : `${g > 0 ? '−' : '+'}${fmtDur(Math.abs(g))}`}</i>`}</span>`; }).join('')}</div>
+<p class="note">Nouveau relevé ? Dis-le à Claude ou ajoute une ligne dans <code>config.js</code> (<code>garminPredictions</code>).</p>` : ''}
 ${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><span class="note">seuil ${fmtPace(thr.fast)}-${fmtPace(thr.slow)}/km à ${fmt0(thrRef.hr)} bpm</span></span>
 <span class="r"><span class="v tnum">${fmtDur(thrPotential)}</span><br>${deltaHtml(thrPotential - targetSec)}</span></div>`
 : `<div class="goal-row"><span class="k">Estimation Riegel<br><span class="note">${best ? `${fmt1(km(best.distance))} km en ${fmtDur(best.duration)}, ${fmtDate(best._date)}` : 'pas de sortie ≥ 10 km'}</span></span>
