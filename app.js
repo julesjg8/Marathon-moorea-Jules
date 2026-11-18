@@ -55,7 +55,7 @@ const peakStart = addDays(raceDate, -49);
 const buildStart = addDays(raceDate, -105);
 const phases = [
 { key: 'base', name: 'Base', from: planStartMon, to: buildStart, color: V('ph-1'), advice: '<b>Base aérobie.</b> On installe la régularité : 3 sorties par semaine, la sortie longue qui s\'allonge de 2 km, une séance de relances ou de seuil.' },
-{ key: 'build', name: 'Développement', from: buildStart, to: peakStart, color: V('ph-2'), advice: '<b>Développement.</b> Travail au seuil et fractionné, premiers blocs à allure marathon dans la sortie longue, qui monte vers 28 km.' },
+{ key: 'build', name: 'Développement', from: buildStart, to: peakStart, color: V('ph-2'), advice: '<b>Développement.</b> Travail au seuil et fractionné, une sortie longue sur deux 100 % facile, l\'autre avec des blocs soutenus ; elle monte vers 28 km.' },
 { key: 'peak', name: 'Pic', from: peakStart, to: taperStart, color: V('ph-3'), advice: '<b>Pic spécifique.</b> Les semaines les plus chargées : les plus longues sorties du plan, avec de longs blocs à allure marathon.' },
 { key: 'taper', name: 'Affûtage', from: taperStart, to: raceDate, color: V('accent'), advice: '<b>Affûtage.</b> Le volume baisse, un peu d\'intensité reste. Le travail est fait : l\'objectif est d\'arriver frais.' }
 ].filter((p) => p.to > p.from);
@@ -142,6 +142,8 @@ const zoneSec = [1, 2, 3, 4, 5].map((z) => inLast(prepRuns, 28).reduce((s, r) =>
 const zoneTotal = zoneSec.reduce((a, b) => a + b, 0);
 const zoneColors = [1, 2, 3, 4, 5].map((z) => V('z' + z));
 const zoneNames = ['Z1 Récup', 'Z2 Endurance', 'Z3 Tempo', 'Z4 Seuil', 'Z5 VO2max'];
+// Avec 3 sorties par semaine (1 qualité, 1 longue, 1 footing), ~65 % en Z1-Z2 est réaliste ; 80 % vaut pour les gros volumes.
+const EASY_TARGET = 0.65;
 const easyShare = zoneTotal ? (zoneSec[0] + zoneSec[1]) / zoneTotal : NaN;
 const days60 = []; for (let i = 59; i >= 0; i--) days60.push(addDays(today, -i));
 const rhr = days60.map((d) => dailyMap.get(dayKey(d))?.heartRate?.restingValue ?? null);
@@ -305,24 +307,46 @@ return `la séance de qualité n'est pas encore faite : fais-la aujourd'hui si t
 return 'footing manqué : inutile de le rattraper, garde ton énergie pour la suite de la semaine.';
 })();
 const STRENGTH = /strength|hiit|pilates|yoga/;
-const strengthN = activities.filter((a) => a._date >= thisMon && STRENGTH.test(a.activityType?.typeKey || '')).length;
+const STRENGTH_GOAL = 2;
+const strengthIn = (mon) => activities.filter((a) => a._date >= mon && a._date < addDays(mon, 7) && STRENGTH.test(a.activityType?.typeKey || '')).length;
+const strengthN = strengthIn(thisMon);
+const DOWS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+const longDowI = Math.max(0, DOWS.indexOf(R.longRunDay || 'SUNDAY'));
+const strengthDays = [1, 3].map((k) => addDays(thisMon, (longDowI + k) % 7).toLocaleDateString('fr-FR', { weekday: 'long' })).join(' et ');
+const strengthHtml = `<details class="renfo"><summary><b>Renforcement</b> · <span class="tnum">${Math.min(strengthN, 9)}/${STRENGTH_GOAL}</span> cette semaine${strengthN >= STRENGTH_GOAL ? ' ✓' : ` · conseillé ${strengthDays}`}</summary>
+<ol><li><b>Gainage planche</b> 3 × 30-45 s</li><li><b>Gainage latéral</b> 2 × 30 s par côté</li><li><b>Squat</b> 3 × 12</li><li><b>Fentes arrière</b> 3 × 10 par jambe</li><li><b>Pont fessier sur une jambe</b> 3 × 10 par jambe</li><li><b>Mollets sur une marche</b> 3 × 15, descente lente sur 3 s</li></ol>
+<p class="note">15 à 20 min, un jour sans séance dure, jamais la veille de la sortie longue. Enregistre-la sur ta montre en « Musculation » pour qu'elle soit comptée.</p></details>`;
 const regulHtml = [
 SC ? { c: curWeek.forced ? 'low' : curWeek.level > 0 ? 'top' : curWeek.level < 0 || curWeek.hold ? 'mid' : '', t: `<b>Auto-régulation</b> · ${regulTxt}` } : null,
 catchUp ? { c: 'mid', t: `<b>Rattrapage</b> · ${catchUp}` } : null,
-{ c: strengthN ? 'top' : '', t: `<b>Renforcement</b> · ${strengthN ? `${strengthN} séance${strengthN > 1 ? 's' : ''} cette semaine. C'est ce qui protège tes genoux et tes tendons quand le volume monte.`
-: 'aucune séance cette semaine. Vise 15 à 20 min (gainage, fentes, mollets, pont fessier) un jour sans course, jamais la veille de la sortie longue.'}` }
+{ c: strengthN >= STRENGTH_GOAL ? 'top' : strengthN ? 'mid' : '', t: strengthHtml }
 ].filter(Boolean).map((n) => `<div class="regul ${n.c}">${n.t}</div>`).join('');
 const weekRow = (w) => {
 const isCur = w === curWeek, past = w.index < curWeek.index;
 const short = (s) => s.title.replace(/^Sortie longue (\d+) km · /, 'SL $1 km · ').replace(/^Sortie longue/, 'SL').replace(' Z2', '');
 return `<details class="wkr ${isCur ? 'cur' : ''} ${past ? 'past' : ''}">
 <summary><span class="wk-n tnum">S${w.index + 1}</span><span class="wk-date">${w.monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span>
-<span class="wk-chips">${w.sessions.map((s) => `<span class="chip"><span class="sw" style="background:${typeColor[s.type]}"></span>${esc(short(s))}</span>`).join('')}${isCur ? '<span class="tag now">en cours</span>' : ''}${w.recovery && !w.forced ? '<span class="tag">allégée</span>' : ''}${w.hold ? '<span class="tag">répétée</span>' : ''}${levelTxt(w) ? `<span class="tag">${levelTxt(w)}</span>` : ''}${w.score && (past || isCur) ? `<span class="tag"><b class="tnum">${w.score.score}</b>/100</span>` : ''}</span>
+<span class="wk-chips">${w.sessions.map((s) => `<span class="chip"><span class="sw" style="background:${typeColor[s.type]}"></span>${esc(short(s))}</span>`).join('')}${isCur ? '<span class="tag now">en cours</span>' : ''}${w.recovery && !w.forced ? '<span class="tag">allégée</span>' : ''}${w.hold ? '<span class="tag">répétée</span>' : ''}${levelTxt(w) ? `<span class="tag">${levelTxt(w)}</span>` : ''}${w.score && (past || isCur) ? `<span class="tag"><b class="tnum">${w.score.score}</b>/100</span>` : ''}${past || isCur ? `<span class="tag">renfo ${strengthIn(w.monday)}/${STRENGTH_GOAL}</span>` : ''}</span>
 <span class="wk-vol tnum"><span class="wk-bar"><i style="width:${Math.round((w.targetKm / maxWeekKm) * 100)}%;background:${phaseAt(addDays(w.monday, 3)).color}"></i></span>${past || isCur ? fmt0(w.doneKm) + ' / ' : ''}${w.targetKm} km</span></summary>
 <div class="sessions">${w.sessions.map((s) => sessionCard(s)).join('')}</div>
 </details>`;
 };
 const R2 = plan.ranges;
+// Test semi : le moment de vérité pour l'objectif (marathon ≈ semi × 2,1 quand le volume reste modéré).
+const SEMI_X = 2.1;
+const semiS = allSessions.find((s) => s.title === 'Test semi-marathon');
+const semiGoal = targetSec / SEMI_X;
+const semiHtml = (() => {
+if (!semiS) return '';
+const r = semiS.run;
+if (!r || km(r.distance) < 19) return `<div class="goal-row"><span class="k">Test semi · ${fmtDate(semiS.date)}<br><span class="note">le moment de vérité pour l'objectif</span></span>
+<span class="r"><span class="v tnum">≤ ${fmtDur(semiGoal)}</span><br><span class="note">pour garder ${goalTxt}</span></span></div>`;
+const half = r.duration * Math.pow(21.0975 / km(r.distance), 1.06), eq = half * SEMI_X;
+const ok = eq <= targetSec + 60;
+const sugg = Math.ceil(eq / 300) * 300;
+return `<div class="goal-row"><span class="k">Test semi · ${fmtDate(r._date)}<br><span class="note">${fmtDur(half)} → marathon ≈ ${fmtDur(eq)}</span></span>
+<span class="r"><span class="v tnum">${ok ? goalTxt + ' ✓' : fmtDur(sugg).replace(/^(\d+):(\d+):00$/, '$1h$2')}</span><br><span class="delta ${ok ? 'ok' : 'ko'}">${ok ? 'objectif confirmé' : 'objectif conseillé, demande à Claude de l\'appliquer'}</span></span></div>`;
+})();
 const firstOf = (pred) => allSessions.find(pred);
 const longest = Math.max(...plan.weeks.map((w) => (w.weeksToRace > 0 && !w.test ? w.longKm : 0)));
 const miles = [
@@ -368,7 +392,7 @@ return { t: `Signaux au vert${pSleep.length ? ` : ${hm(avg(pSleep))} de sommeil 
 const trainingTip = (() => {
 if (!pRuns.length) return { t: `Aucune course la semaine dernière${lastRun && lastRun._date < prevMon ? ` : ta dernière sortie datait du ${fmtDate(lastRun._date).replace(/\.$/, '')}` : ''}.`, d: `Reprends avec les 3 séances prévues, sans chercher à rattraper. Sur la séance de qualité, reste à ${fmtPace(paces.threshold.fast)}-${fmtPace(paces.threshold.slow)}/km même si ça paraît facile : tes jambes ont perdu un peu de rythme.` };
 if (prevPlanWeek && prevPlanWeek.doneCount < 2) return { t: `${prevPlanWeek.doneCount} séance sur ${prevPlanWeek.sessions.length} la semaine dernière.`, d: 'La régularité compte plus que n\'importe quelle séance. Si tu dois en sauter une cette semaine, saute le footing, jamais la sortie longue.' };
-if (isFinite(pEasy) && pEasy < 0.6) return { t: `Seulement ${Math.round(pEasy * 100)} % de ton temps de course en zones 1-2.`, d: `Tes footings sont trop rapides : ils te fatiguent sans te faire progresser. Tiens ${z2Txt} sur le footing et le début de la sortie longue, quitte à marcher dans les côtes.` };
+if (isFinite(pEasy) && pEasy < EASY_TARGET - 0.15) return { t: `${Math.round(pEasy * 100)} % de ton temps de course en zones 1-2, pour environ ${Math.round(EASY_TARGET * 100)} % visés.`, d: `Avec 3 sorties par semaine, pas besoin de 80 %, mais la sortie longue doit rester majoritairement facile. Garde sa partie endurance sous ${hrCap ? hrCap - 6 : 160} bpm, et les blocs soutenus sous ${runZones && runZones.zone4Floor ? runZones.zone4Floor : 166} bpm.` };
 if (prev3 > 5 && pKm > prev3 * 1.3) return { t: `${fmt0(pKm)} km la semaine dernière, contre ${fmt0(prev3)} km en moyenne avant.`, d: 'C\'est une hausse rapide. Tiens-toi au volume prévu cette semaine, sans rien ajouter, pour laisser tes tendons s\'adapter.' };
 const longDone = Math.max(0, ...pRuns.map((r) => km(r.distance)));
 if (prevPlanWeek && longDone < prevPlanWeek.longKm * 0.8 && prevPlanWeek.longKm) return { t: `Ta plus longue sortie a fait ${fmt1(longDone)} km pour ${prevPlanWeek.longKm} prévus.`, d: 'La sortie longue est la séance clé du marathon. Cette semaine, protège-la : bloque le créneau et pars lentement.' };
@@ -564,6 +588,7 @@ ${garminPred ? deltaHtml(garminPred - targetSec) : '<span class="note">À rensei
 ${gpHist.length ? `<div class="gp-hist" aria-label="Suivi de la prédiction Garmin">${gpHist.slice(-6).map((p, i, a) => { const prev = i ? a[i - 1].t : (gpHist.length > a.length ? gpHist[gpHist.length - a.length - 1].t : null); const g = prev != null ? prev - p.t : null;
 return `<span class="gp"><span>${fmtDM(p.d)}</span><b class="tnum">${fmtDur(p.t)}</b>${g == null ? '<i>1er relevé</i>' : `<i class="${g >= 0 ? 'ok' : 'ko'}">${Math.abs(g) < 5 ? 'stable' : `${g > 0 ? '−' : '+'}${fmtDur(Math.abs(g))}`}</i>`}</span>`; }).join('')}</div>
 <p class="note">Nouveau relevé ? Dis-le à Claude ou ajoute une ligne dans <code>config.js</code> (<code>garminPredictions</code>).</p>` : ''}
+${semiHtml}
 ${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><span class="note">seuil ${fmtPace(thr.fast)}-${fmtPace(thr.slow)}/km à ${fmt0(thrRef.hr)} bpm</span></span>
 <span class="r"><span class="v tnum">${fmtDur(thrPotential)}</span><br>${deltaHtml(thrPotential - targetSec)}</span></div>`
 : `<div class="goal-row"><span class="k">Estimation Riegel<br><span class="note">${best ? `${fmt1(km(best.distance))} km en ${fmtDur(best.duration)}, ${fmtDate(best._date)}` : 'pas de sortie ≥ 10 km'}</span></span>
@@ -608,7 +633,7 @@ ${regulHtml}
 <div class="tile"><div class="k">Assiduité depuis le début</div><div class="v tnum">${due.length ? dueDone : '–'}<small>${due.length ? `/ ${due.length} séance${due.length > 1 ? 's' : ''}` : ''}</small></div><div class="progress"><span style="width:${due.length ? Math.round((dueDone / due.length) * 100) : 0}%"></span></div></div>
 <div class="tile"><div class="k">Volume moyen (4 sem.)</div><div class="v tnum">${fmt1(km28avg)}<small>km/sem</small></div><div class="s">Prévu cette semaine : ${curWeek.targetKm} km</div></div>
 <div class="tile"><div class="k">Plus longue sortie (28 j)</div><div class="v tnum">${fmt1(long28)}<small>/ ${plan.maxLongKm} km</small></div><div class="progress"><span style="width:${Math.min(100, (long28 / plan.maxLongKm) * 100)}%"></span></div></div>
-<div class="tile"><div class="k">Temps en zones 1-2 (28 j)</div><div class="v tnum">${isFinite(easyShare) ? Math.round(easyShare * 100) : '–'}<small>%</small></div><div class="s">Cible : environ 80 %</div></div>
+<div class="tile"><div class="k">Temps en zones 1-2 (28 j)</div><div class="v tnum">${isFinite(easyShare) ? Math.round(easyShare * 100) : '–'}<small>%</small></div><div class="s">Cible : environ ${Math.round(EASY_TARGET * 100)} % (3 sorties/sem.)</div></div>
 <div class="tile"><div class="k">Charge aiguë / chronique</div><div class="v tnum">${isFinite(acr) ? acr.toLocaleString('fr-FR', { maximumFractionDigits: 2, minimumFractionDigits: 2 }) : '–'}</div>${statusHtml(acrStatus)}</div>
 <div class="tile"><div class="k">Prochain jalon</div>${miles[0] ? `<div class="v tnum">J-${Math.round((miles[0].date - today) / DAY)}</div><div class="s">${esc(miles[0].label)} · ${fmtDate(miles[0].date)}</div>` : '<div class="v">–</div>'}</div>
 </section>

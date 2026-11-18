@@ -99,9 +99,13 @@ let reps, blockKm, kind;
 if (weeksToRace === 1) { reps = 2; blockKm = 2; kind = 'mp'; }
 else if (weeksToRace === 2) { reps = 2; blockKm = 4; kind = 'mp'; }
 else if (recovery || km < 14) { reps = 1; blockKm = 3; kind = 'sout'; }
-else if (phase === 'base') { kind = 'sout'; if (odd) { reps = 2; blockKm = km >= 18 ? 4 : 3; } else { reps = 1; blockKm = km >= 18 ? 5 : 4; } }
-else if (phase === 'build') { if (odd) { reps = km >= 26 ? 3 : 2; blockKm = 5; kind = 'mp'; } else { reps = 3; blockKm = 4; kind = 'sout'; } }
+// Base et développement : une sortie longue sur deux 100 % facile, l'autre avec des blocs soutenus.
+// Les blocs à allure marathon sont réservés au pic.
+else if (phase === 'base' || phase === 'build') { if (odd) kind = 'easy'; else { kind = 'sout'; if (phase === 'base') { reps = 1; blockKm = km >= 18 ? 5 : 4; } else { reps = 3; blockKm = 4; } } }
 else { kind = 'mp'; if (odd) { reps = 3; blockKm = 5; } else { reps = 2; blockKm = 6; } }
+if (kind === 'easy') return { type: 'long', title: `Sortie longue ${km} km · 100 % facile`,
+steps: [step('Echauffement', 'warmup', M(2000), zEasy, o.easyPace), run('Endurance active', M((km - 3) * 1000), longR), step('Retour au calme', 'cooldown', M(1000), zEasy, o.easyPace)],
+desc: 'Tout en endurance, sans bloc rapide : c\'est le volume qui construit ton marathon. Si la FC monte, ralentis.' };
 const fits = (r) => (r > 1 ? 2 + 2 + r * (blockKm + 1) + 1 : 2 + 2 + blockKm + 1) <= km;
 while (reps > 1 && !fits(reps)) reps--;
 const block = kind === 'mp' ? mpS(M(blockKm * 1000)) : run('Allure soutenue', M(blockKm * 1000), soutR);
