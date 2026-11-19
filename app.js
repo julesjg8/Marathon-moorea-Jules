@@ -201,7 +201,7 @@ const regul = levels.length ? levels[levels.length - 1] : { level: 0, force: fal
 const allSessions = plan.weeks.flatMap((w) => w.sessions);
 const nextSession = allSessions.find((s) => s.date >= today && !s.run && s.type !== 'race');
 const curWeek = plan.weeks[Math.min(curWeekIdx, plan.weeks.length - 1)];
-const typeColor = { easy: V('neutral'), quality: V('accent'), long: V('accent'), test: V('text'), race: V('text') };
+const typeColor = { easy: V('t-easy'), quality: V('t-quality'), long: V('t-long'), test: V('t-test'), race: V('t-race') };
 const typeLabel = { easy: 'Footing', quality: 'Qualité', long: 'Sortie longue', test: 'Test', race: 'Course' };
 const fitName = (s) => `${dayKey(s.date)}_${noAccent(s.title).replace(/[^A-Za-z0-9]+/g, '-').replace(/-+$/, '')}.fit`;
 const wktName = (s) => `${fmtDM(s.date).replace('/', '-')} ${noAccent(s.title)}`;
@@ -246,7 +246,7 @@ const scoreDetail = sc ? `<div class="score-detail"><div class="score-title">Ana
 ${sc.parts.map((p) => `<div class="score-row"><span class="score-name">${p.name}</span><span class="score-bar"><i class="${scClass}" style="width:${Math.round((p.pts / p.max) * 100)}%"></i></span><span class="score-pts tnum">${p.pts}/${p.max}</span><span class="score-txt">${esc(p.txt)}</span></div>`).join('')}</div>` : '';
 const hasSteps = s.steps.length > 0;
 const open = forceOpen === true || isNext;
-return `<div class="session ${isNext ? 'next' : ''}" data-s="${i}">
+return `<div class="session ${isNext ? 'next' : ''}" data-s="${i}" style="border-top-color:${typeColor[s.type]}">
 <button type="button" class="s-head" ${hasSteps ? `aria-expanded="${open}"` : 'disabled'}>
 <span class="s-day">${esc(s.date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' }))}</span>
 <span class="s-type"><span class="sw" style="background:${typeColor[s.type]}"></span>${typeLabel[s.type]} · <span class="tnum">≈ ${fmt1(s.km)} km · ${fmtHM(s.sec)}</span></span>
@@ -308,7 +308,8 @@ catchUp ? { c: 'mid', t: `<b>Rattrapage</b> · ${catchUp}` } : null,
 const weekRow = (w) => {
 const isCur = w === curWeek, past = w.index < curWeek.index;
 const short = (s) => s.title.replace(/^Sortie longue (\d+) km · /, 'SL $1 km · ').replace(/^Sortie longue/, 'SL').replace(' Z2', '');
-return `<details class="wkr ${isCur ? 'cur' : ''} ${past ? 'past' : ''}">
+const ph = phases.find((p) => w.monday >= p.from && w.monday < p.to) || phases[phases.length - 1];
+return `<details class="wkr ${isCur ? 'cur' : ''} ${past ? 'past' : ''}" style="--ph:${ph.color}">
 <summary><span class="wk-n tnum">S${w.index + 1}</span><span class="wk-date">${w.monday.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span>
 <span class="wk-chips">${w.sessions.map((s) => `<span class="chip"><span class="sw" style="background:${typeColor[s.type]}"></span>${esc(short(s))}</span>`).join('')}${isCur ? '<span class="tag now">en cours</span>' : ''}${w.recovery && !w.forced ? '<span class="tag">allégée</span>' : ''}${w.hold ? '<span class="tag">répétée</span>' : ''}${levelTxt(w) ? `<span class="tag">${levelTxt(w)}</span>` : ''}${w.score && (past || isCur) ? `<span class="tag"><b class="tnum">${w.score.score}</b>/100</span>` : ''}${past || isCur ? `<span class="tag">renfo ${strengthIn(w.monday)}/${STRENGTH_GOAL}</span>` : ''}</span>
 <span class="wk-vol tnum"><span class="wk-bar"><i style="width:${Math.round((w.targetKm / maxWeekKm) * 100)}%;background:${phaseAt(addDays(w.monday, 3)).color}"></i></span>${past || isCur ? fmt0(w.doneKm) + ' / ' : ''}${w.targetKm} km</span></summary>
@@ -527,6 +528,39 @@ const NAV = [
 ['goal', 'Objectif', '<path d="M5 21V4h12l-2 4 2 4H5"/>'],
 ['recup', 'Récup', '<path d="M12 21s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.5-7 10-7 10z"/>']
 ];
+// Month calendar: every planned session on its day (on the day it was run when done)
+const calMonths = (() => {
+const first = new Date(planStartMon.getFullYear(), planStartMon.getMonth(), 1), last = new Date(raceDate.getFullYear(), raceDate.getMonth(), 1);
+const byDay = new Map();
+allSessions.forEach((x) => { const k = dayKey(x.run ? x.run._date : x.date); if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(x); });
+const out = [];
+for (let m = new Date(first); m <= last; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
+const start = monday(m), end = new Date(m.getFullYear(), m.getMonth() + 1, 0);
+let cells = '', list = '';
+for (let d = new Date(start); d <= end || d.getDay() !== 1; d = addDays(d, 1)) {
+const k = dayKey(d), inM = d.getMonth() === m.getMonth(), list = byDay.get(k) || [];
+const isToday = k === dayKey(today), isRace = k === dayKey(raceDate);
+cells += `<div class="cal-d${inM ? '' : ' out'}${isToday ? ' today' : ''}${isRace ? ' race' : ''}${d < startOfDay(today) ? ' past' : ''}"><span class="cal-n">${d.getDate()}</span>${inM ? list.map((x) => `<button type="button" class="cal-s ${x.run ? 'done' : x.missed ? 'miss' : ''}" style="--c:${typeColor[x.type]}" data-goto="${allSessions.indexOf(x)}" title="${esc(x.title)}"><b>${x.run ? '✓ ' : x.missed ? '✗ ' : ''}<em>${esc(x.type === 'long' ? 'SL' : x.type === 'easy' ? 'Footing' : x.type === 'race' ? 'Course' : x.type === 'test' ? 'Test' : 'Qualité')}</em></b><span class="tnum">${fmt0(x.run ? km(x.run.distance) : x.km)} km</span></button>`).join('') : ''}</div>`;
+}
+allSessions.filter((x) => { const d = x.run ? x.run._date : x.date; return d.getMonth() === m.getMonth() && d.getFullYear() === m.getFullYear(); })
+.sort((a, b) => (a.run ? a.run._date : a.date) - (b.run ? b.run._date : b.date)).forEach((x) => {
+const d = x.run ? x.run._date : x.date;
+list += `<button type="button" class="cal-row" style="--c:${typeColor[x.type]}" data-goto="${allSessions.indexOf(x)}"><span class="cal-rd tnum">${d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' })}</span><span class="cal-rt"><b>${esc(x.title)}</b><small>${x.run ? `✓ ${fmt1(km(x.run.distance))} km en ${fmtDur(x.run.duration)}${x.score ? ` · ${x.score.total}/100` : ''}` : x.missed ? '✗ Non réalisée' : `≈ ${fmt1(x.km)} km · ${fmtHM(x.sec)}`}</small></span></button>`;
+});
+out.push({ m, html: cells, list });
+}
+return out;
+})();
+const calCur = Math.max(0, calMonths.findIndex((c) => c.m.getMonth() === today.getMonth() && c.m.getFullYear() === today.getFullYear()));
+const calHtml = `<section class="card" id="cal" data-tab="plan">
+${calMonths.map((c, i) => `<div class="cal-month" data-mi="${i}" ${i === calCur ? '' : 'hidden'}>
+<div class="cal-head"><button type="button" class="icon-btn" data-calgo="${i - 1}" ${i ? '' : 'disabled'} aria-label="Mois précédent">‹</button><h2>${c.m.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</h2><button type="button" class="icon-btn" data-calgo="${i + 1}" ${i < calMonths.length - 1 ? '' : 'disabled'} aria-label="Mois suivant">›</button></div>
+<div class="cal-grid"><span class="cal-wd">L</span><span class="cal-wd">M</span><span class="cal-wd">M</span><span class="cal-wd">J</span><span class="cal-wd">V</span><span class="cal-wd">S</span><span class="cal-wd">D</span>${c.html}</div>
+<div class="cal-list">${c.list || '<p class="note">Aucune séance ce mois-ci.</p>'}</div>
+</div>`).join('')}
+<div class="legend">${['easy', 'quality', 'long', 'test'].map((t) => `<span><span class="sw" style="background:${typeColor[t]}"></span>${typeLabel[t]}</span>`).join('')}<span>✓ faite · ✗ manquée</span></div>
+<p class="note">Touche une séance pour voir son détail.</p>
+</section>`;
 // ===== 6. Construction de la page =====
 app.innerHTML = `
 <header class="topbar"><div class="top-in">
@@ -558,7 +592,7 @@ ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv$
 <section class="card" data-tab="today">
 <div class="coach-head"><h2>Les conseils du coach</h2><span>${factsTxt}</span></div>
 <div class="coach-tips">
-<div class="tip"><div class="tip-k"><span class="sw" style="background:${V('neutral')}"></span>Récupération</div><div class="tip-t">${esc(recoveryTip.t)}</div><div class="tip-d">${esc(recoveryTip.d)}</div></div>
+<div class="tip"><div class="tip-k"><span class="sw" style="background:${V('t-easy')}"></span>Récupération</div><div class="tip-t">${esc(recoveryTip.t)}</div><div class="tip-d">${esc(recoveryTip.d)}</div></div>
 <div class="tip"><div class="tip-k"><span class="sw" style="background:${V('accent')}"></span>Entraînement</div><div class="tip-t">${esc(trainingTip.t)}</div><div class="tip-d">${esc(trainingTip.d)}</div></div>
 </div>
 </section>
@@ -597,6 +631,7 @@ ${regulHtml}
 <div class="tile"><div class="k">Prochain jalon</div>${miles[0] ? `<div class="v tnum">J-${Math.round((miles[0].date - today) / DAY)}</div><div class="s">${esc(miles[0].label)} · ${fmtDate(miles[0].date)}</div>` : '<div class="v">–</div>'}</div>
 </section>
 ${compareHtml}
+${calHtml}
 <section class="card" id="plan" data-tab="plan">
 <h2>Plan complet jusqu'au marathon</h2>
 <div class="sub">${plan.weeks.length} semaines · 3 séances par semaine · ouvre une semaine pour voir ses séances</div>
@@ -636,7 +671,7 @@ ${garminPred ? deltaHtml(garminPred - targetSec) : '<span class="note">À rensei
 ${gpHist.length ? `<div class="gp-hist" aria-label="Suivi de la prédiction Garmin">${gpHist.slice(-6).map((p, i, a) => { const prev = i ? a[i - 1].t : (gpHist.length > a.length ? gpHist[gpHist.length - a.length - 1].t : null); const g = prev != null ? prev - p.t : null;
 return `<span class="gp"><span>${fmtDM(p.d)}</span><b class="tnum">${fmtDur(p.t)}</b>${g == null ? '<i>1er relevé</i>' : `<i class="${g >= 0 ? 'ok' : 'ko'}">${Math.abs(g) < 5 ? 'stable' : `${g > 0 ? '−' : '+'}${fmtDur(Math.abs(g))}`}</i>`}</span>`; }).join('')}</div>
 ` : ''}
-<form class="gp-add" id="gpForm"><span class="k">Prédiction du jour</span><input type="date" name="d" value="${dayKey(today)}" aria-label="Date du relevé"><input type="text" name="t" placeholder="4:14:54" inputmode="numeric" aria-label="Temps prédit (h:mm:ss)" required><button type="submit" class="btn primary">Ajouter</button><span class="note gp-msg">Enregistré sur ce téléphone. Même date = valeur remplacée.</span></form>
+<form class="gp-add" id="gpForm"><span class="k">Prédiction du jour</span><input type="date" name="d" value="${dayKey(today)}" aria-label="Date du relevé"><input type="text" name="t" placeholder="4:14:54" autocomplete="off" autocapitalize="off" aria-label="Temps prédit (h:mm:ss)" required><button type="submit" class="btn primary">Ajouter</button><span class="note gp-msg">Enregistré sur ce téléphone. Même date = valeur remplacée.</span></form>
 ${semiHtml}
 ${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><span class="note">seuil ${fmtPace(thr.fast)}-${fmtPace(thr.slow)}/km à ${fmt0(thrRef.hr)} bpm</span></span>
 <span class="r"><span class="v tnum">${fmtDur(thrPotential)}</span><br>${deltaHtml(thrPotential - targetSec)}</span></div>`
@@ -727,7 +762,7 @@ data: { labels: d60Labels, datasets: [{ label: 'FC repos', data: rhr, ...thin(C.
 options: { interaction: hover, scales: { x: scaleX(), y: scaleY() }, plugins: { tooltip: { callbacks: { label: (c) => ` ${c.raw} bpm` } } } } });
 mk('cSleep', { type: 'bar',
 data: { labels: days30.map(fmtDM), datasets: [{ label: 'Sommeil', data: sleepH.map((v) => (v == null ? null : Math.round(v * 10) / 10)), ...bar(C.s1), maxBarThickness: 10 }] },
-options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ beginAtZero: true, suggestedMax: 9 }) },
+options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ beginAtZero: false, grace: '10%' }) },
 plugins: { tooltip: { callbacks: { label: (c) => ` ${hm(c.raw)}` } } } } });
 };
 const recoveryEl = document.getElementById('recovery');
@@ -790,7 +825,7 @@ if (recoveryEl.open) show('recovery');
 };
 const tabOf = (id) => { const el = document.getElementById(id); return (el && el.closest('[data-tab]')?.dataset.tab) || 'today'; };
 const subFor = (id) => document.getElementById(id)?.closest('[data-sub]')?.dataset.sub;
-const SUBS = { plan: [['week', 'Cette semaine', '#week'], ['cal', 'Calendrier', '#plan']], data: [['res', 'Résumé', '.kpis6'], ['seances', 'Séances', '#compare'], ['graph', 'Graphiques', 'main > .grid']] };
+const SUBS = { plan: [['week', 'Semaine', '#week'], ['cal', 'Calendrier', '#cal'], ['prog', 'Programme', '#plan']], data: [['res', 'Résumé', '.kpis6'], ['seances', 'Séances', '#compare'], ['graph', 'Graphiques', 'main > .grid']] };
 const subOf = {};
 Object.entries(SUBS).forEach(([tab, list]) => {
 subOf[tab] = list[0][0];
@@ -818,10 +853,12 @@ const meta = document.querySelector('meta[name="theme-color"]');
 if (meta) meta.content = t === 'light' ? '#f4f3ef' : '#0d0d0d';
 drawCharts(false);
 };
+const f0 = (x) => { x = x.trim(); const dg = x.replace(/\D/g, ''); return /^\d+$/.test(x) && dg.length >= 3 && dg.length <= 6 ? dg.padEnd(dg.length <= 3 ? 3 : dg.length <= 5 ? 5 : 6, '0').replace(/^(\d)(\d\d)(\d\d)?$/, (m0, h, mm, ss) => `${h}:${mm}:${ss || '00'}`) : x; };
 app.addEventListener('submit', (e) => {
 if (e.target.id !== 'gpForm') return;
 e.preventDefault();
-const f = e.target, d = f.d.value, raw = f.t.value.trim().replace(/[hH'.,\s]+/g, ':').replace(/:+$/, ''), parts = raw.split(':');
+let v = f0(e.target.t.value);
+const f = e.target, d = f.d.value, raw = v.replace(/[hH'.,\s]+/g, ':').replace(/:+$/, ''), parts = raw.split(':');
 const msg = f.querySelector('.gp-msg');
 const t = parts.length === 2 ? raw + ':00' : raw;
 if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{1,2}:\d{2}:\d{2}$/.test(t) || parseTime(t) < 7200 || parseTime(t) > 28800) { msg.textContent = 'Format attendu : 4:14:54 (entre 2 h et 8 h).'; msg.classList.add('err'); return; }
@@ -833,6 +870,8 @@ app.addEventListener('click', (e) => {
 const t = e.target;
 const nav = t.closest('[data-nav]');
 if (nav) { e.preventDefault(); const id = nav.dataset.nav; if (NAV.some(([k]) => k === id)) setTab(id); else { setTab(tabOf(id), false, subFor(id)); const el = document.getElementById(id); if (el) glide(el); } return; }
+const cg = t.closest('[data-calgo]');
+if (cg) { app.querySelectorAll('.cal-month').forEach((m) => { m.hidden = m.dataset.mi !== cg.dataset.calgo; }); return; }
 const st = t.closest('[data-subtab]');
 if (st) { const [tb, sb] = st.dataset.subtab.split(':'); setTab(tb, false, sb); return; }
 if (t.closest('#themeBtn')) { setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'); return; }
@@ -840,7 +879,7 @@ const go = t.closest('[data-goto]');
 if (go) {
 const sel = `[data-s="${go.dataset.goto}"]`, el = document.querySelector('#week ' + sel) || document.querySelector('#plan ' + sel);
 if (!el) return;
-setTab('plan', true, el.closest('#week') ? 'week' : 'cal');
+setTab('plan', true, el.closest('#week') ? 'week' : 'prog');
 const d = el.closest('details'), head = el.querySelector('.s-head');
 if (d) d.open = true;
 if (head && !head.disabled) openSteps(head, true);
