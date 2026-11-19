@@ -536,7 +536,7 @@ allSessions.forEach((x) => { const k = dayKey(x.run ? x.run._date : x.date); if 
 const out = [];
 for (let m = new Date(first); m <= last; m = new Date(m.getFullYear(), m.getMonth() + 1, 1)) {
 const start = monday(m), end = new Date(m.getFullYear(), m.getMonth() + 1, 0);
-let cells = '', list = '';
+let cells = '', list = '', lastWk = '';
 for (let d = new Date(start); d <= end || d.getDay() !== 1; d = addDays(d, 1)) {
 const k = dayKey(d), inM = d.getMonth() === m.getMonth(), list = byDay.get(k) || [];
 const isToday = k === dayKey(today), isRace = k === dayKey(raceDate);
@@ -544,7 +544,8 @@ cells += `<div class="cal-d${inM ? '' : ' out'}${isToday ? ' today' : ''}${isRac
 }
 allSessions.filter((x) => { const d = x.run ? x.run._date : x.date; return d.getMonth() === m.getMonth() && d.getFullYear() === m.getFullYear(); })
 .sort((a, b) => (a.run ? a.run._date : a.date) - (b.run ? b.run._date : b.date)).forEach((x) => {
-const d = x.run ? x.run._date : x.date;
+const d = x.run ? x.run._date : x.date, wk = dayKey(monday(d));
+if (wk !== lastWk) { const wi = plan.weeks.find((w) => dayKey(w.monday) === wk); list += `<div class="cal-sep"><span>${wi ? 'Semaine ' + (wi.index + 1) + ' · ' : ''}du ${fmtDM(monday(d))}</span></div>`; lastWk = wk; }
 list += `<button type="button" class="cal-row" style="--c:${typeColor[x.type]}" data-goto="${allSessions.indexOf(x)}"><span class="cal-rd tnum">${d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric' })}</span><span class="cal-rt"><b>${esc(x.title)}</b><small>${x.run ? `✓ ${fmt1(km(x.run.distance))} km en ${fmtDur(x.run.duration)}${x.score ? ` · ${x.score.total}/100` : ''}` : x.missed ? '✗ Non réalisée' : `≈ ${fmt1(x.km)} km · ${fmtHM(x.sec)}`}</small></span></button>`;
 });
 out.push({ m, html: cells, list });
@@ -694,21 +695,21 @@ ${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><
 <div class="legend"><span><span class="sw" style="background:${V('series-1')}"></span>Allure moyenne de la sortie</span><span><span class="ln"></span>Allure marathon (${fmtPace(targetPace)})</span></div></div>
 ${hasPot ? `<div class="card span-6"><h2>Ton potentiel marathon</h2><div class="sub">D'après ta meilleure séance au seuil des 12 semaines précédentes · plus haut = plus rapide</div><div class="chart sm"><canvas id="cPot"></canvas></div>
 <div class="legend"><span><span class="sw" style="background:${V('series-1')}"></span>Potentiel</span><span><span class="ln"></span>Objectif (${goalTxt})</span></div></div>` : ''}
-<div class="card span-6"><h2>Prédiction Garmin au fil du temps</h2><div class="sub">Temps marathon prédit par ta montre · plus haut = plus rapide</div>
+<div class="card ${hasPot ? 'span-6' : 'span-12'}"><h2>Charge d'entraînement par semaine</h2><div class="sub">Tous sports confondus · charge Garmin</div><div class="chart sm"><canvas id="cLoad"></canvas></div></div>
+</section>
+<section class="card" id="gpCard" data-tab="goal"><h2>Prédiction Garmin au fil du temps</h2><div class="sub">Temps marathon prédit par ta montre · plus haut = plus rapide</div>
 ${gpHist.length >= 2 ? `<div class="chart sm"><canvas id="cGp"></canvas></div>
 <div class="legend"><span><span class="sw" style="background:${V('series-7')}"></span>Prédiction Garmin</span><span><span class="ln"></span>Objectif (${goalTxt})</span></div>
 <p class="note">Depuis le ${fmtDate(gpHist[0].d)} : ${(() => { const g = gpHist[0].t - gpLast.t; return Math.abs(g) < 30 ? 'stable' : `${g > 0 ? 'gagné' : 'perdu'} ${fmtDur(Math.abs(g))}`; })()} · dernière : ${fmtDur(gpLast.t)}, ${deltaHtml(gpLast.t - targetSec)}</p>`
-: `<p class="note">${gpHist.length ? `Une seule valeur pour l'instant (${fmtDur(gpHist[0].t)} le ${fmtDate(gpHist[0].d)}). La courbe apparaît dès la 2e.` : 'Aucune prédiction saisie.'} Ajoute une ligne dans <code>config.js</code>, dans <code>garminPredictions</code>, à chaque fois que tu relèves la prédiction sur ta montre.</p>`}</div>
-<div class="card ${hasPot ? 'span-12' : 'span-6'}"><h2>Charge d'entraînement par semaine</h2><div class="sub">Tous sports confondus · charge Garmin</div><div class="chart sm"><canvas id="cLoad"></canvas></div></div>
-</section>
+: `<p class="note">${gpHist.length ? `Une seule valeur pour l'instant (${fmtDur(gpHist[0].t)} le ${fmtDate(gpHist[0].d)}). La courbe apparaît dès la 2e.` : 'Aucune prédiction saisie.'} Ajoute ta prédiction dans la case « Prédiction du jour » à chaque relevé.</p>`}</section>
 <h1 class="tab-title" data-tab="recup">Récupération</h1>
 <details class="card recovery" id="recovery" data-tab="recup" open>
 <summary><b>Récupération</b><span class="tnum">VFC ${latestHrv?.lastNightAvg ?? '–'} ms · FC repos ${isFinite(rhr7) ? fmt0(rhr7) : '–'} bpm · Sommeil ${isFinite(sleep7) ? fmt1(sleep7) : '–'} h</span></summary>
 <div class="grid">
-<div class="card span-4"><h2>VFC nocturne</h2><div class="sub">60 jours · ms</div><div class="chart sm"><canvas id="cHrv"></canvas></div>
+<div class="card span-4"><h2>VFC nocturne</h2><div class="rec-v tnum">${latestHrv?.lastNightAvg ?? '–'}<small>ms la nuit dernière</small></div><div class="sub">60 jours · ms</div><div class="chart sm"><canvas id="cHrv"></canvas></div>
 <div class="legend"><span><span class="sw" style="background:${V('series-7')}"></span>VFC</span><span><span class="sw" style="background:${V('band')}"></span>Plage normale</span></div></div>
-<div class="card span-4"><h2>FC au repos</h2><div class="sub">60 jours · bpm</div><div class="chart sm"><canvas id="cRhr"></canvas></div></div>
-<div class="card span-4"><h2>Sommeil</h2><div class="sub">30 jours · heures par nuit</div><div class="chart sm"><canvas id="cSleep"></canvas></div></div>
+<div class="card span-4"><h2>FC au repos</h2><div class="rec-v tnum">${isFinite(rhr7) ? fmt0(rhr7) : '–'}<small>bpm, moyenne 7 jours</small></div><div class="sub">60 jours · bpm</div><div class="chart sm"><canvas id="cRhr"></canvas></div></div>
+<div class="card span-4"><h2>Sommeil</h2><div class="rec-v tnum">${isFinite(sleep7) ? fmt1(sleep7) : '–'}<small>h par nuit, moyenne 7 jours</small></div><div class="sub">30 jours · heures par nuit</div><div class="chart sm"><canvas id="cSleep"></canvas></div></div>
 </div>
 </details>
 <footer data-tab="all"><span>Données Garmin du ${fetchedTxt}${(D.errors || []).length ? ' · ' + D.errors.length + ' source(s) en erreur' : ''}</span><span>Mise à jour automatique chaque soir à 20 h</span></footer>
