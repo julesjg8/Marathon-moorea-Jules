@@ -154,6 +154,10 @@ for (let w = 0; w < curWeekIdx; w++) if (weekRuns(addDays(planStartMon, w * 7)).
 // ===== 3. Plan d'entraînement, notes des séances et auto-régulation =====
 const SC = window.SessionScore;
 const levels = [];
+let feel = {}; try { feel = JSON.parse(localStorage.getItem('feel') || '{}') || {}; } catch (e) { /* nothing saved */ }
+const feelKey = (s) => `${dayKey(s.date)}|${s.type}`;
+const feelCount = (list) => { const f = { facile: 0, bien: 0, dur: 0, tresdur: 0, n: 0 };
+list.forEach((s) => { const v = feel[feelKey(s)]; if (v && f[v] !== undefined) { f[v]++; f.n++; } }); return f; };
 const adjustOf = (w) => {
 if (w < levels.length) return levels[w];
 return { level: 0, force: false };
@@ -195,6 +199,12 @@ if (SC) for (let w = 0; w <= curWeekIdx; w++) {
 const p = buildPlan();
 levels[w] = SC.decide(p.weeks.slice(Math.max(0, w - 3), w).map((x) => x.score).filter(Boolean));
 if (levels[w].level > 0 && w > 0 && levels[w - 1].level > 0) { levels[w].level = 0; levels[w].capped = true; }
+// Ressenti noté après les séances de la semaine précédente : 2 « dur » (ou 1 « très dur ») bloquent le durcissement, 3 points adoucissent.
+const prev = w > 0 ? p.weeks[w - 1] : null;
+if (prev) { const f = feelCount(prev.sessions), heavy = f.dur + 2 * f.tresdur;
+if (heavy >= 3 && levels[w].level >= 0) { levels[w].level = -1; levels[w].feel = { effect: 'down', f }; }
+else if (heavy >= 2 && levels[w].level > 0) { levels[w].level = 0; levels[w].feel = { effect: 'hold', f }; }
+else if (f.n) levels[w].feel = { effect: '', f }; }
 }
 const plan = buildPlan();
 const regul = levels.length ? levels[levels.length - 1] : { level: 0, force: false, avg: null, n: 0 };
@@ -231,6 +241,10 @@ const fuelHtml = (s) => { const min = s.sec / 60; if ((s.type !== 'long' && s.ty
 const n = Math.floor((min - 1) / 40);
 return `<div class="fuel"><b>Ravitaillement</b> · ${n} gel${n > 1 ? 's' : ''} ou équivalent (20 à 25 g de glucides chacun) : un toutes les 40 min à partir de la 40e minute, avec quelques gorgées d'eau tous les quarts d'heure.${s.type === 'race' ? '' : ' Prends ce que tu utiliseras le jour J : l\'estomac s\'entraîne aussi.'}</div>`; };
 // ===== 4. Affichage des séances et des semaines =====
+const FEELS = [['facile', 'Facile'], ['bien', 'Bien'], ['dur', 'Dur'], ['tresdur', 'Très dur']];
+const feelHtml = (s, i) => { if (s.type === 'race' || s.missed) return '';
+const cur = feel[feelKey(s)], future = s.date > today;
+return `<div class="feel" role="group" aria-label="Ressenti de la séance"><span class="feel-k">${future ? 'À noter après la séance' : 'Ton ressenti'}</span><span class="feel-b">${FEELS.map(([v, l]) => `<button type="button" class="feel-o f-${v}${cur === v ? ' on' : ''}" data-feel="${i}" data-v="${v}" aria-pressed="${cur === v}"${future ? ' disabled' : ''}>${l}</button>`).join('')}</span></div>`; };
 const sessionCard = (s, forceOpen) => {
 const i = allSessions.indexOf(s);
 const isNext = s === nextSession;
@@ -258,6 +272,7 @@ ${scoreBadge}
 ${sc ? `<span class="s-sum">${esc(sc.summary)}</span>` : ''}
 ${hasSteps ? `<span class="s-more">${sc ? 'Analyse et étapes de la séance' : 'Étapes de la séance'}</span>` : ''}
 </button>
+${feelHtml(s, i)}
 ${hasSteps ? `<div class="s-steps" ${open ? '' : 'hidden'}>${scoreDetail}<ol>${stepsHtml(s.steps)}</ol>${r ? '' : fuelHtml(s)}
 ${canDownload ? `<button type="button" class="btn fit-btn ${isNext ? 'primary' : ''}" data-sid="${i}">⌚ Fichier pour la montre (.fit)</button>` : ''}
 </div>` : ''}
@@ -265,6 +280,9 @@ ${canDownload ? `<button type="button" class="btn fit-btn ${isNext ? 'primary' :
 };
 const levelTxt = (w) => (w.forced ? 'récup forcée' : w.level > 0 ? 'durcie' : w.level < 0 ? 'adoucie' : '');
 const weekFlags = (w) => `${phaseName(w.phase)}${w.recovery && !w.forced ? ' · allégée' : ''}${w.hold ? ' · répétée' : ''}${levelTxt(w) ? ' · ' + levelTxt(w) : ''}`;
+const feelTxt = !regul.feel || curWeek.weeksToRace < 3 ? '' : (() => { const f = regul.feel.f, hard = f.dur + f.tresdur;
+const what = hard ? `${hard} séance${hard > 1 ? 's' : ''} notée${hard > 1 ? 's' : ''} dure${hard > 1 ? 's' : ''}` : `${f.n} séance${f.n > 1 ? 's' : ''} notée${f.n > 1 ? 's' : ''}, aucune dure`;
+return ` <br>Ressenti de la semaine dernière : ${what}${regul.feel.effect === 'down' ? ' → programme <b>adouci</b>.' : regul.feel.effect === 'hold' ? ' → pas de durcissement cette semaine.' : '.'}`; })();
 const regulTxt = !regul.n ? 'pas encore de semaine terminée dans le plan : le programme suit sa progression normale. Tes notes commenceront à l\'ajuster dès la semaine prochaine.'
 : `note moyenne ${regul.avg}/100 sur ${regul.n === 1 ? 'la dernière semaine' : `les ${regul.n} dernières semaines`} → ${
 curWeek.weeksToRace < 3 ? 'c\'est l\'affûtage : le programme ne change plus, place à la fraîcheur.'
@@ -274,7 +292,7 @@ curWeek.weeksToRace < 3 ? 'c\'est l\'affûtage : le programme ne change plus, pl
 : regul.level > 0 ? 'programme <b>durci</b> d\'un cran (sortie longue +3 km, séance de qualité plus longue).'
 : regul.level < 0 ? 'programme <b>adouci</b> d\'un cran (sortie longue +1 km, séance de qualité plus courte).'
 : regul.capped ? 'la semaine dernière était déjà durcie : celle-ci reste <b>normale</b> (une semaine durcie sur deux au maximum).'
-: 'programme <b>maintenu</b> tel quel.'}`;
+: 'programme <b>maintenu</b> tel quel.'}${feelTxt}`;
 const when = (d) => (+d === +today ? 'aujourd\'hui' : +d === +addDays(today, 1) ? 'demain' : d.toLocaleDateString('fr-FR', { weekday: 'long' }));
 const catchUp = (() => {
 const late = curWeek.sessions.filter((s) => s.late);
@@ -886,6 +904,17 @@ if (d) d.open = true;
 if (head && !head.disabled) openSteps(head, true);
 glide(el, 'center');
 el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1300);
+return;
+}
+const fo = t.closest('.feel-o');
+if (fo) {
+const s = allSessions[Number(fo.dataset.feel)]; if (!s) return;
+const k = feelKey(s), v = feel[k] === fo.dataset.v ? null : fo.dataset.v;
+if (v) feel[k] = v; else delete feel[k];
+try { localStorage.setItem('feel', JSON.stringify(feel)); } catch (err) { /* private mode */ }
+app.querySelectorAll(`.feel-o[data-feel="${fo.dataset.feel}"]`).forEach((b) => { const on = b.dataset.v === v; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+// Une note de la semaine passée change l'ajustement de cette semaine : on recalcule.
+if (plan.weeks.findIndex((w) => w.sessions.includes(s)) === curWeekIdx - 1) { location.hash = '#plan'; setTimeout(() => location.reload(), 250); }
 return;
 }
 const fb = t.closest('.fit-btn');
