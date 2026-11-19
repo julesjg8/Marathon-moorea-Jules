@@ -512,18 +512,18 @@ ${!c.sessions.length ? '<p class="cmp-empty">Aucune séance de ce type depuis le
 ${c.done.length > 1 ? `<div class="cmp-charts">${['a', 'b'].map((x) => `<figure><figcaption>${c[x]}</figcaption><div class="chart xs"><canvas id="cCmp-${k}-${x}"></canvas></div></figure>`).join('')}</div>` : ''}
 ${groups.map((g) => `${g ? `<h3 class="cmp-group">${g}</h3>` : ''}<div class="cmp-list">${cmpGroup(c, c.sessions.filter((s) => c.family(s) === g))}</div>`).join('')}`}
 </div>`; };
-const compareHtml = `<section class="card" id="compare">
+const compareHtml = `<section class="card" id="compare" data-tab="data">
 <h2>Comparer mes séances</h2><div class="sub">De la plus récente à la plus ancienne · en couleur, l'écart avec la séance précédente du même type</div>
 <div class="cmp-tabs" role="tablist">${cmpKeys.map((k, i) => `<button type="button" role="tab" class="cmp-tab ${i ? '' : 'active'}" aria-selected="${!i}" data-cmp="${k}">${CMP[k].label}<span class="tnum">${CMP[k].done.length}</span></button>`).join('')}</div>
 ${cmpKeys.map((k, i) => cmpPanel(k, !i)).join('')}
 </section>`;
 const svg = (d, cls = '') => `<svg viewBox="0 0 24 24" aria-hidden="true"${cls ? ` class="${cls}"` : ''}>${d}</svg>`;
 const NAV = [
+['plan', 'Plan', '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>'],
+['data', 'Données', '<path d="M6 20v-8M12 20V4M18 20v-5"/>'],
 ['today', 'Aujourd\'hui', '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>'],
-['week', 'Semaine', '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>'],
-['compare', 'Comparer', '<path d="M4 8h14l-3-3M20 16H6l3 3"/>'],
-['plan', 'Plan', '<path d="M5 21V4h12l-2 4 2 4H5"/>'],
-['stats', 'Stats', '<path d="M6 20v-8M12 20V4M18 20v-5"/>']
+['goal', 'Objectif', '<path d="M5 21V4h12l-2 4 2 4H5"/>'],
+['recup', 'Récup', '<path d="M12 21s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.5-7 10-7 10z"/>']
 ];
 // ===== 6. Construction de la page =====
 app.innerHTML = `
@@ -538,8 +538,8 @@ svg('<path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5a7 7 0 0 0 10 10z"/>', 'i-moon')}
 </div>
 </div></header>
 <main class="wrap">
-${stale ? `<div class="banner"><b>Synchro en retard.</b> Les dernières données Garmin datent d'${ago(ageMs)}, alors que la mise à jour passe chaque soir à 20 h. Si ça dure, regarde l'onglet Actions de ton dépôt GitHub.</div>` : ''}
-<section class="card today" id="today">
+${stale ? `<div class="banner" data-tab="today"><b>Synchro en retard.</b> Les dernières données Garmin datent d'${ago(ageMs)}, alors que la mise à jour passe chaque soir à 20 h. Si ça dure, regarde l'onglet Actions de ton dépôt GitHub.</div>` : ''}
+<section class="card today" id="today" data-tab="today">
 <div>
 <div class="eyebrow">Aujourd'hui · ${today.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
 <h1 class="today-title">${todayCard.title}</h1>
@@ -553,14 +553,15 @@ ${homeWeek}
 ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv${x.lv}"><i>${x.lv ? '!' : '✓'}</i><span>${x.k} <b class="tnum">${esc(x.v)}</b>${x.n ? ` · ${x.n}` : ''}</span></span>`).join('')}</div>` : ''}
 </div>
 </section>
-<section class="card">
+<section class="card" data-tab="today">
 <div class="coach-head"><h2>Les conseils du coach</h2><span>${factsTxt}</span></div>
 <div class="coach-tips">
 <div class="tip"><div class="tip-k"><span class="sw" style="background:${V('series-3')}"></span>Récupération</div><div class="tip-t">${esc(recoveryTip.t)}</div><div class="tip-d">${esc(recoveryTip.d)}</div></div>
 <div class="tip"><div class="tip-k"><span class="sw" style="background:${V('accent')}"></span>Entraînement</div><div class="tip-t">${esc(trainingTip.t)}</div><div class="tip-d">${esc(trainingTip.d)}</div></div>
 </div>
 </section>
-<section class="card" id="week">
+<h1 class="tab-title" data-tab="plan">Plan d'entraînement</h1>
+<section class="card" id="week" data-tab="plan">
 <div class="plan-top">
 <div><h2>Cette semaine · du ${curWeek.monday.getDate()} au ${curEnd.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</h2>
 <div class="sub">Semaine ${curWeek.index + 1} sur ${plan.weeks.length} · ${weekFlags(curWeek)} · touche une séance pour voir ses étapes</div></div>
@@ -584,7 +585,8 @@ ${regulHtml}
 </ol>
 </details>
 </section>
-<section class="kpis6">
+<h1 class="tab-title" data-tab="data">Données d'entraînement</h1>
+<section class="kpis6" data-tab="data">
 <div class="tile"><div class="k">Assiduité depuis le début</div><div class="v tnum">${due.length ? dueDone : '–'}<small>${due.length ? `/ ${due.length} séance${due.length > 1 ? 's' : ''}` : ''}</small></div><div class="progress"><span style="width:${due.length ? Math.round((dueDone / due.length) * 100) : 0}%"></span></div></div>
 <div class="tile"><div class="k">Volume moyen (4 sem.)</div><div class="v tnum">${fmt1(km28avg)}<small>km/sem</small></div><div class="s">Prévu cette semaine : ${curWeek.targetKm} km</div></div>
 <div class="tile"><div class="k">Plus longue sortie (28 j)</div><div class="v tnum">${fmt1(long28)}<small>/ ${plan.maxLongKm} km</small></div><div class="progress"><span style="width:${Math.min(100, (long28 / plan.maxLongKm) * 100)}%"></span></div></div>
@@ -593,7 +595,7 @@ ${regulHtml}
 <div class="tile"><div class="k">Prochain jalon</div>${miles[0] ? `<div class="v tnum">J-${Math.round((miles[0].date - today) / DAY)}</div><div class="s">${esc(miles[0].label)} · ${fmtDate(miles[0].date)}</div>` : '<div class="v">–</div>'}</div>
 </section>
 ${compareHtml}
-<section class="card" id="plan">
+<section class="card" id="plan" data-tab="plan">
 <h2>Plan complet jusqu'au marathon</h2>
 <div class="sub">${plan.weeks.length} semaines · 3 séances par semaine · ouvre une semaine pour voir ses séances</div>
 <div class="miles">${miles.map((m) => `<span class="mile"><b>${esc(m.label)}</b><span class="tnum">${dayMon(m.date)} · J-${Math.round((m.date - today) / DAY)}</span></span>`).join('')}</div>
@@ -610,7 +612,8 @@ ${R.distanceKm > 21.0975 ? `<details class="raceplan"><summary>Mon plan de cours
 <div class="wk-list">${planListHtml()}</div>
 <p class="note">Le plan s'ajuste à ce que tu cours vraiment. Les allures suivent ton seuil, mesuré sur tes séances des 12 dernières semaines. Une séance compte même si tu la changes de jour dans la semaine. Une semaine terminée avec moins de 2 sorties fait répéter la semaine suivante au lieu de l'allonger. La sortie longue est plafonnée à 3 h 15 d'effort, soit ${plan.maxLongKm} km à ton allure actuelle.</p>
 </section>
-<section class="hero" id="stats">
+<h1 class="tab-title" data-tab="goal">Objectif et prédictions</h1>
+<section class="hero" id="stats" data-tab="goal">
 <div class="card">
 <div class="eyebrow">Objectif</div>
 <h2 class="hero-title">${esc(R.name)} · ${raceDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
@@ -641,7 +644,7 @@ ${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><
 : `Ta vitesse au seuil vaut aujourd'hui un marathon en ${fmtDur(thrPotential)}. Il reste de la vitesse à gagner, puis l'endurance pour la tenir 42 km.`}</div>
 </div>
 </section>
-<section class="grid">
+<section class="grid" data-tab="data">
 <div class="card span-8"><h2>Volume de course par semaine</h2><div class="sub">Depuis le début de la prépa · km</div><div class="chart"><canvas id="cKm"></canvas></div></div>
 <div class="card span-4"><h2>Zones cardiaques · 28 jours</h2><div class="sub">Temps passé en course</div>
 <div class="zones">${zoneSec.map((s, i) => `<div style="flex:${s || 0} 0 0;background:${zoneColors[i]}" title="${zoneNames[i]} : ${zoneTotal ? Math.round((s / zoneTotal) * 100) : 0} %"></div>`).join('')}</div>
@@ -660,7 +663,8 @@ ${gpHist.length >= 2 ? `<div class="chart sm"><canvas id="cGp"></canvas></div>
 : `<p class="note">${gpHist.length ? `Une seule valeur pour l'instant (${fmtDur(gpHist[0].t)} le ${fmtDate(gpHist[0].d)}). La courbe apparaît dès la 2e.` : 'Aucune prédiction saisie.'} Ajoute une ligne dans <code>config.js</code>, dans <code>garminPredictions</code>, à chaque fois que tu relèves la prédiction sur ta montre.</p>`}</div>
 <div class="card ${hasPot ? 'span-12' : 'span-6'}"><h2>Charge d'entraînement par semaine</h2><div class="sub">Tous sports confondus · charge Garmin</div><div class="chart sm"><canvas id="cLoad"></canvas></div></div>
 </section>
-<details class="card recovery" id="recovery">
+<h1 class="tab-title" data-tab="recup">Récupération</h1>
+<details class="card recovery" id="recovery" data-tab="recup" open>
 <summary><b>Récupération</b><span class="tnum">VFC ${latestHrv?.lastNightAvg ?? '–'} ms · FC repos ${isFinite(rhr7) ? fmt0(rhr7) : '–'} bpm · Sommeil ${isFinite(sleep7) ? fmt1(sleep7) : '–'} h</span></summary>
 <div class="grid">
 <div class="card span-4"><h2>VFC nocturne</h2><div class="sub">60 jours · ms</div><div class="chart sm"><canvas id="cHrv"></canvas></div>
@@ -669,7 +673,7 @@ ${gpHist.length >= 2 ? `<div class="chart sm"><canvas id="cGp"></canvas></div>
 <div class="card span-4"><h2>Sommeil</h2><div class="sub">30 jours · heures par nuit</div><div class="chart sm"><canvas id="cSleep"></canvas></div></div>
 </div>
 </details>
-<footer><span>Données Garmin du ${fetchedTxt}${(D.errors || []).length ? ' · ' + D.errors.length + ' source(s) en erreur' : ''}</span><span>Mise à jour automatique chaque soir à 20 h</span></footer>
+<footer data-tab="all"><span>Données Garmin du ${fetchedTxt}${(D.errors || []).length ? ' · ' + D.errors.length + ' source(s) en erreur' : ''}</span><span>Mise à jour automatique chaque soir à 20 h</span></footer>
 </main>`;
 setTimeout(() => app.classList.add('settled'), 1500); // ends the entrance animations for good (see styles.css)
 const reduce = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -781,6 +785,15 @@ plugins: { tooltip: { callbacks: { label: (c) => ` Charge ${fmt0(c.raw)}` } } } 
 show(activeCmp);
 if (recoveryEl.open) show('recovery');
 };
+const tabOf = (id) => { const el = document.getElementById(id); return (el && el.closest('[data-tab]')?.dataset.tab) || 'today'; };
+const setTab = (tab, keepScroll) => {
+app.querySelectorAll('main > [data-tab]').forEach((el) => { el.hidden = el.dataset.tab !== tab && el.dataset.tab !== 'all'; });
+app.querySelectorAll('.nav a').forEach((a) => { const on = a.dataset.nav === tab; a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+if (location.hash.slice(1) !== tab) history.replaceState(null, '', tab === 'today' ? location.pathname : '#' + tab);
+if (tab === 'recup') show('recovery');
+if (!keepScroll) window.scrollTo(0, 0);
+if (tab === 'data' || tab === 'recup') drawCharts(false);
+};
 const glide = (el, block) => el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: block || 'start' });
 const openSteps = (head, open) => { head.setAttribute('aria-expanded', String(open)); head.parentElement.querySelector('.s-steps').hidden = !open; };
 const setTheme = (t) => {
@@ -793,12 +806,13 @@ drawCharts(false);
 app.addEventListener('click', (e) => {
 const t = e.target;
 const nav = t.closest('[data-nav]');
-if (nav) { e.preventDefault(); const el = document.getElementById(nav.dataset.nav); if (el) glide(el); return; }
+if (nav) { e.preventDefault(); const id = nav.dataset.nav; if (NAV.some(([k]) => k === id)) setTab(id); else { setTab(tabOf(id)); const el = document.getElementById(id); if (el) glide(el); } return; }
 if (t.closest('#themeBtn')) { setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'); return; }
 const go = t.closest('[data-goto]');
 if (go) {
 const sel = `[data-s="${go.dataset.goto}"]`, el = document.querySelector('#week ' + sel) || document.querySelector('#plan ' + sel);
 if (!el) return;
+setTab('plan', true);
 const d = el.closest('details'), head = el.querySelector('.s-head');
 if (d) d.open = true;
 if (head && !head.disabled) openSteps(head, true);
@@ -824,13 +838,8 @@ const head = t.closest('.s-head');
 if (head && !head.disabled) openSteps(head, head.getAttribute('aria-expanded') !== 'true');
 });
 recoveryEl.addEventListener('toggle', () => { if (recoveryEl.open) show('recovery'); });
-if ('IntersectionObserver' in window) {
-const links = [...app.querySelectorAll('.nav a')];
-const io = new IntersectionObserver((entries) => entries.forEach((en) => {
-if (en.isIntersecting) links.forEach((a) => a.classList.toggle('on', a.dataset.nav === en.target.dataset.sec));
-}), { rootMargin: '-40% 0px -55% 0px' });
-let sec = NAV[0][0];
-[...app.querySelector('main').children].forEach((el) => { if (NAV.some(([id]) => id === el.id)) sec = el.id; el.dataset.sec = sec; io.observe(el); });
-}
+// Une page par onglet : seules les sections de l'onglet choisi sont affichées.
+setTab(NAV.some(([k]) => k === location.hash.slice(1)) ? location.hash.slice(1) : 'today', true);
+window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (NAV.some(([k]) => k === h)) setTab(h); });
 drawCharts(true);
 })();
