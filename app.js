@@ -457,7 +457,7 @@ const pct = (d) => Math.max(0, Math.min(100, ((d - tlStart) / totalSpan) * 100))
 const tlSegs = phases.map((p) => `<div class="tl-seg ${p.to <= today ? 'past' : ''} ${p.key === current.key ? 'cur' : ''}" style="flex:${(p.to - p.from) / DAY} 0 0;background:${p.color}" title="${p.name} : ${fmtDM(p.from)} → ${fmtDM(p.to)}">${p.name}</div>`).join('');
 const fetched = new Date(D.fetchedAt);
 const fetchedTxt = fetched.toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
-const ageMs = Date.now() - fetched, stale = ageMs > 9 * 3600000;
+const ageMs = Date.now() - fetched, stale = ageMs > 30 * 3600000; // synchro quotidienne à 20 h (Polynésie)
 const ago = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m < 1 ? 'à l\'instant' : m < 60 ? `il y a ${m} min` : m < 2880 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
 const curEnd = addDays(curWeek.monday, 6);
 const dayMon = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
@@ -527,7 +527,7 @@ const NAV = [
 ];
 // ===== 6. Construction de la page =====
 app.innerHTML = `
-<header class="top"><div class="top-in">
+<header class="topbar"><div class="top-in">
 <a class="brand" href="#today" data-nav="today"><span class="logo">42</span><span class="brand-t">Prépa Marathon</span><span class="dday tnum">J-${daysLeft}</span></a>
 <nav class="nav" aria-label="Sections de la page">${NAV.map(([id, l, d]) => `<a href="#${id}" data-nav="${id}" class="${id === 'today' ? 'on' : ''}">${svg(d)}<span>${l}</span></a>`).join('')}</nav>
 <div class="top-act">
@@ -538,7 +538,7 @@ svg('<path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5a7 7 0 0 0 10 10z"/>', 'i-moon')}
 </div>
 </div></header>
 <main class="wrap">
-${stale ? `<div class="banner"><b>Synchro en retard.</b> Les dernières données Garmin datent d'${ago(ageMs)}, alors que la mise à jour passe toutes les 3 heures. Si ça dure, regarde l'onglet Actions de ton dépôt GitHub.</div>` : ''}
+${stale ? `<div class="banner"><b>Synchro en retard.</b> Les dernières données Garmin datent d'${ago(ageMs)}, alors que la mise à jour passe chaque soir à 20 h. Si ça dure, regarde l'onglet Actions de ton dépôt GitHub.</div>` : ''}
 <section class="card today" id="today">
 <div>
 <div class="eyebrow">Aujourd'hui · ${today.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
@@ -669,7 +669,7 @@ ${gpHist.length >= 2 ? `<div class="chart sm"><canvas id="cGp"></canvas></div>
 <div class="card span-4"><h2>Sommeil</h2><div class="sub">30 jours · heures par nuit</div><div class="chart sm"><canvas id="cSleep"></canvas></div></div>
 </div>
 </details>
-<footer><span>Données Garmin du ${fetchedTxt}${(D.errors || []).length ? ' · ' + D.errors.length + ' source(s) en erreur' : ''}</span><span>Mise à jour automatique toutes les 3 heures</span></footer>
+<footer><span>Données Garmin du ${fetchedTxt}${(D.errors || []).length ? ' · ' + D.errors.length + ' source(s) en erreur' : ''}</span><span>Mise à jour automatique chaque soir à 20 h</span></footer>
 </main>`;
 setTimeout(() => app.classList.add('settled'), 1500); // ends the entrance animations for good (see styles.css)
 const reduce = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
