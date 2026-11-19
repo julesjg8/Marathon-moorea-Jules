@@ -1,7 +1,7 @@
 name: Synchro Garmin
 on:
   schedule:
-    - cron: '0 */3 * * *'
+    - cron: '0 6 * * *'   # tous les jours à 20 h, heure de Polynésie (UTC-10)
   workflow_dispatch:
   push:
     branches: [main]
