@@ -63,6 +63,8 @@ const predSec = best ? riegel(best) : NaN;
 const gpMap = new Map();
 (Array.isArray(R.garminPredictions) ? R.garminPredictions : []).forEach((p) => { if (Array.isArray(p) && /^\d{4}-\d{2}-\d{2}$/.test(p[0]) && parseTime(p[1]) > 0) gpMap.set(p[0], parseTime(p[1])); });
 if (R.garminPredictedTime && parseTime(R.garminPredictedTime) > 0) gpMap.set(/^\d{4}-\d{2}-\d{2}$/.test(R.garminPredictedDate || '') ? R.garminPredictedDate : '', parseTime(R.garminPredictedTime));
+let gpUser = []; try { gpUser = JSON.parse(localStorage.getItem('gpUser') || '[]'); } catch (e) { /* nothing saved */ }
+(Array.isArray(gpUser) ? gpUser : []).forEach((p) => { if (Array.isArray(p) && /^\d{4}-\d{2}-\d{2}$/.test(p[0]) && parseTime(p[1]) > 0) gpMap.set(p[0], parseTime(p[1])); });
 const gpHist = [...gpMap].filter(([d]) => d).map(([d, t]) => ({ d: new Date(d + 'T00:00:00'), t })).sort((a, b) => a.d - b.d);
 const gpLast = gpHist[gpHist.length - 1];
 const garminPred = gpLast ? gpLast.t : gpMap.get('') || 0;
@@ -199,7 +201,7 @@ const regul = levels.length ? levels[levels.length - 1] : { level: 0, force: fal
 const allSessions = plan.weeks.flatMap((w) => w.sessions);
 const nextSession = allSessions.find((s) => s.date >= today && !s.run && s.type !== 'race');
 const curWeek = plan.weeks[Math.min(curWeekIdx, plan.weeks.length - 1)];
-const typeColor = { easy: V('series-1'), quality: V('accent'), long: V('series-7'), test: V('series-3'), race: V('text') };
+const typeColor = { easy: V('neutral'), quality: V('accent'), long: V('accent'), test: V('text'), race: V('text') };
 const typeLabel = { easy: 'Footing', quality: 'Qualité', long: 'Sortie longue', test: 'Test', race: 'Course' };
 const fitName = (s) => `${dayKey(s.date)}_${noAccent(s.title).replace(/[^A-Za-z0-9]+/g, '-').replace(/-+$/, '')}.fit`;
 const wktName = (s) => `${fmtDM(s.date).replace('/', '-')} ${noAccent(s.title)}`;
@@ -556,7 +558,7 @@ ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv$
 <section class="card" data-tab="today">
 <div class="coach-head"><h2>Les conseils du coach</h2><span>${factsTxt}</span></div>
 <div class="coach-tips">
-<div class="tip"><div class="tip-k"><span class="sw" style="background:${V('series-3')}"></span>Récupération</div><div class="tip-t">${esc(recoveryTip.t)}</div><div class="tip-d">${esc(recoveryTip.d)}</div></div>
+<div class="tip"><div class="tip-k"><span class="sw" style="background:${V('neutral')}"></span>Récupération</div><div class="tip-t">${esc(recoveryTip.t)}</div><div class="tip-d">${esc(recoveryTip.d)}</div></div>
 <div class="tip"><div class="tip-k"><span class="sw" style="background:${V('accent')}"></span>Entraînement</div><div class="tip-t">${esc(trainingTip.t)}</div><div class="tip-d">${esc(trainingTip.d)}</div></div>
 </div>
 </section>
@@ -603,7 +605,7 @@ ${compareHtml}
 <div class="tl-dates"><span>${fmtDM(tlStart)}</span><span>Course : ${fmtDM(raceDate)}</span></div>
 <div class="phase-advice">${current.advice}</div>
 <div class="chart sm"><canvas id="cPlan"></canvas></div>
-<div class="legend"><span><span class="sw" style="background:${V('series-1')}"></span>Prévu</span><span><span class="sw" style="background:${V('accent')}"></span>Réalisé</span></div>
+<div class="legend"><span><span class="sw" style="background:${V('neutral')}"></span>Prévu</span><span><span class="sw" style="background:${V('accent')}"></span>Réalisé</span></div>
 ${R.distanceKm > 21.0975 ? `<details class="raceplan"><summary>Mon plan de course pour le jour J</summary>
 <p>Départ prudent : les 5 premiers kilomètres à ${fmtPace(racePlan.slow)}/km, puis ${fmtPace(racePlan.rest)}/km jusqu'à l'arrivée. Tes temps de passage pour finir en ${goalTxt} :</p>
 <div class="splits tnum">${racePlan.rows.map((r) => `<div class="split"><span>${r.l}</span><b>${fmtDur(r.t)}</b></div>`).join('')}</div>
@@ -633,7 +635,8 @@ ${R.distanceKm > 21.0975 ? `<details class="raceplan"><summary>Mon plan de cours
 ${garminPred ? deltaHtml(garminPred - targetSec) : '<span class="note">À renseigner dans config.js</span>'}</span></div>
 ${gpHist.length ? `<div class="gp-hist" aria-label="Suivi de la prédiction Garmin">${gpHist.slice(-6).map((p, i, a) => { const prev = i ? a[i - 1].t : (gpHist.length > a.length ? gpHist[gpHist.length - a.length - 1].t : null); const g = prev != null ? prev - p.t : null;
 return `<span class="gp"><span>${fmtDM(p.d)}</span><b class="tnum">${fmtDur(p.t)}</b>${g == null ? '<i>1er relevé</i>' : `<i class="${g >= 0 ? 'ok' : 'ko'}">${Math.abs(g) < 5 ? 'stable' : `${g > 0 ? '−' : '+'}${fmtDur(Math.abs(g))}`}</i>`}</span>`; }).join('')}</div>
-<p class="note">Nouveau relevé ? Dis-le à Claude ou ajoute une ligne dans <code>config.js</code> (<code>garminPredictions</code>).</p>` : ''}
+` : ''}
+<form class="gp-add" id="gpForm"><span class="k">Prédiction du jour</span><input type="date" name="d" value="${dayKey(today)}" aria-label="Date du relevé"><input type="text" name="t" placeholder="4:14:54" inputmode="numeric" aria-label="Temps prédit (h:mm:ss)" required><button type="submit" class="btn primary">Ajouter</button><span class="note gp-msg">Enregistré sur ce téléphone. Même date = valeur remplacée.</span></form>
 ${semiHtml}
 ${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><span class="note">seuil ${fmtPace(thr.fast)}-${fmtPace(thr.slow)}/km à ${fmt0(thrRef.hr)} bpm</span></span>
 <span class="r"><span class="v tnum">${fmtDur(thrPotential)}</span><br>${deltaHtml(thrPotential - targetSec)}</span></div>`
@@ -743,7 +746,7 @@ Chart.defaults.maintainAspectRatio = false;
 Object.assign(Chart.defaults.plugins.tooltip, { backgroundColor: C.tip, borderColor: C.axis, borderWidth: 1, titleColor: C.text, bodyColor: C.text2, padding: 10, cornerRadius: 8, displayColors: true, boxPadding: 4 });
 mk('cPlan', { type: 'bar',
 data: { labels: plan.weeks.map((w) => fmtDM(w.monday)), datasets: [
-{ label: 'Prévu', data: plan.weeks.map((w) => w.targetKm), ...bar(C.s1), maxBarThickness: 14 },
+{ label: 'Prévu', data: plan.weeks.map((w) => w.targetKm), ...bar(C.neutral), maxBarThickness: 14 },
 { label: 'Réalisé', data: plan.weeks.map((w) => (w.index <= curWeek.index ? Math.round(w.doneKm * 10) / 10 : null)), ...bar(C.accent), maxBarThickness: 14 }
 ] },
 options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ beginAtZero: true }) },
@@ -786,13 +789,25 @@ show(activeCmp);
 if (recoveryEl.open) show('recovery');
 };
 const tabOf = (id) => { const el = document.getElementById(id); return (el && el.closest('[data-tab]')?.dataset.tab) || 'today'; };
-const setTab = (tab, keepScroll) => {
-app.querySelectorAll('main > [data-tab]').forEach((el) => { el.hidden = el.dataset.tab !== tab && el.dataset.tab !== 'all'; });
+const subFor = (id) => document.getElementById(id)?.closest('[data-sub]')?.dataset.sub;
+const SUBS = { plan: [['week', 'Cette semaine', '#week'], ['cal', 'Calendrier', '#plan']], data: [['res', 'Résumé', '.kpis6'], ['seances', 'Séances', '#compare'], ['graph', 'Graphiques', 'main > .grid']] };
+const subOf = {};
+Object.entries(SUBS).forEach(([tab, list]) => {
+subOf[tab] = list[0][0];
+list.forEach(([k, , sel]) => { const el = app.querySelector(sel); if (el) el.dataset.sub = k; });
+const bar = document.createElement('div'); bar.className = 'seg'; bar.dataset.tab = tab; bar.setAttribute('role', 'tablist');
+bar.innerHTML = list.map(([k, l]) => `<button type="button" role="tab" data-subtab="${tab}:${k}">${l}</button>`).join('');
+app.querySelector(`.tab-title[data-tab="${tab}"]`).after(bar);
+});
+const setTab = (tab, keepScroll, sub) => {
+if (sub) subOf[tab] = sub;
+app.querySelectorAll('main > [data-tab]').forEach((el) => { el.hidden = (el.dataset.tab !== tab && el.dataset.tab !== 'all') || (el.dataset.sub && el.dataset.sub !== subOf[tab]); });
+app.querySelectorAll('[data-subtab]').forEach((b) => { const on = b.dataset.subtab === tab + ':' + subOf[tab]; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
 app.querySelectorAll('.nav a').forEach((a) => { const on = a.dataset.nav === tab; a.classList.toggle('on', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
 if (location.hash.slice(1) !== tab) history.replaceState(null, '', tab === 'today' ? location.pathname : '#' + tab);
 if (tab === 'recup') show('recovery');
 if (!keepScroll) window.scrollTo(0, 0);
-if (tab === 'data' || tab === 'recup') drawCharts(false);
+if (tab !== 'today') drawCharts(false);
 };
 const glide = (el, block) => el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: block || 'start' });
 const openSteps = (head, open) => { head.setAttribute('aria-expanded', String(open)); head.parentElement.querySelector('.s-steps').hidden = !open; };
@@ -803,16 +818,29 @@ const meta = document.querySelector('meta[name="theme-color"]');
 if (meta) meta.content = t === 'light' ? '#f4f3ef' : '#0d0d0d';
 drawCharts(false);
 };
+app.addEventListener('submit', (e) => {
+if (e.target.id !== 'gpForm') return;
+e.preventDefault();
+const f = e.target, d = f.d.value, raw = f.t.value.trim().replace(/[hH'.,\s]+/g, ':').replace(/:+$/, ''), parts = raw.split(':');
+const msg = f.querySelector('.gp-msg');
+const t = parts.length === 2 ? raw + ':00' : raw;
+if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !/^\d{1,2}:\d{2}:\d{2}$/.test(t) || parseTime(t) < 7200 || parseTime(t) > 28800) { msg.textContent = 'Format attendu : 4:14:54 (entre 2 h et 8 h).'; msg.classList.add('err'); return; }
+const list = (Array.isArray(gpUser) ? gpUser : []).filter((x) => x[0] !== d); list.push([d, t]);
+try { localStorage.setItem('gpUser', JSON.stringify(list)); } catch (err) { msg.textContent = 'Impossible d\'enregistrer (navigation privée ?).'; msg.classList.add('err'); return; }
+location.hash = '#goal'; location.reload();
+});
 app.addEventListener('click', (e) => {
 const t = e.target;
 const nav = t.closest('[data-nav]');
-if (nav) { e.preventDefault(); const id = nav.dataset.nav; if (NAV.some(([k]) => k === id)) setTab(id); else { setTab(tabOf(id)); const el = document.getElementById(id); if (el) glide(el); } return; }
+if (nav) { e.preventDefault(); const id = nav.dataset.nav; if (NAV.some(([k]) => k === id)) setTab(id); else { setTab(tabOf(id), false, subFor(id)); const el = document.getElementById(id); if (el) glide(el); } return; }
+const st = t.closest('[data-subtab]');
+if (st) { const [tb, sb] = st.dataset.subtab.split(':'); setTab(tb, false, sb); return; }
 if (t.closest('#themeBtn')) { setTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'); return; }
 const go = t.closest('[data-goto]');
 if (go) {
 const sel = `[data-s="${go.dataset.goto}"]`, el = document.querySelector('#week ' + sel) || document.querySelector('#plan ' + sel);
 if (!el) return;
-setTab('plan', true);
+setTab('plan', true, el.closest('#week') ? 'week' : 'cal');
 const d = el.closest('details'), head = el.querySelector('.s-head');
 if (d) d.open = true;
 if (head && !head.disabled) openSteps(head, true);

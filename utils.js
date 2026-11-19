@@ -5,7 +5,7 @@ const DAY = 86400000;
 const V = (name) => `var(--${name})`;
 const readColors = () => { const cs = getComputedStyle(document.documentElement), g = (v) => cs.getPropertyValue('--' + v).trim();
 return { text: g('text'), text2: g('text-2'), muted: g('muted'), grid: g('grid'), axis: g('axis'), accent: g('accent'), s1: g('series-1'),
-s3: g('series-3'), s7: g('series-7'), serious: g('serious'), surface: g('surface'), tip: g('tip-bg'), band: g('band') }; };
+s3: g('series-3'), s7: g('series-7'), serious: g('serious'), surface: g('surface'), tip: g('tip-bg'), band: g('band'), neutral: g('neutral') }; };
 const parseLocal = (s) => new Date(String(s).replace(' ', 'T'));
 const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
