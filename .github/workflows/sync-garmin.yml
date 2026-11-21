@@ -37,7 +37,8 @@ jobs:
             echo "Aucun changement."
           else
             git commit -m "Synchro Garmin $(date -u '+%Y-%m-%d %H:%M UTC')"
-            git pull --rebase --autostash
+            # Une autre synchro a pu publier data.json entre-temps : on garde la plus récente (celle-ci).
+            git pull --rebase --autostash -X theirs
             git push
           fi
       - name: Preparer le site
@@ -46,6 +47,13 @@ jobs:
           path: .
       - name: Publier le site
         id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+      - name: Publier le site (2e essai si GitHub a eu un raté)
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 60
+      - name: Publier le site (2e essai)
+        if: steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@v4
       - name: Garder la synchro active
         if: always()
