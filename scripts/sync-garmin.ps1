@@ -264,10 +264,24 @@ foreach ($c in (Get-Chunks 'Daily summaries' { param($a, $b) "/usersummary-servi
 }
 
 $sleep = New-Object System.Collections.ArrayList
+$sleepFieldsLogged = $false
 foreach ($c in (Get-Chunks 'Sleep' { param($a, $b) "/sleep-service/sleep/dailySleepSummariesByDate?startDate=$a&endDate=$b" })) {
   foreach ($x in @($c)) {
     if (-not $x) { continue }
-    [void]$sleep.Add([ordered]@{ calendarDate = (DateText $x.calendarDate $fmt); sleepTimeSeconds = $x.sleepTimeSeconds })
+    if (-not $sleepFieldsLogged) { $sleepFieldsLogged = $true; Write-Host ('  sleep fields: ' + (($x.PSObject.Properties.Name) -join ', ')) }
+    $sc = $x.sleepScores.overall.value
+    if ($null -eq $sc) { $sc = $x.overallSleepScore.value }
+    if ($null -eq $sc -and $x.sleepScore -is [ValueType]) { $sc = $x.sleepScore }
+    if ($null -eq $sc) { $sc = $x.sleepScore.value }
+    [void]$sleep.Add([ordered]@{
+      calendarDate     = (DateText $x.calendarDate $fmt)
+      sleepTimeSeconds = $x.sleepTimeSeconds
+      deepSeconds      = $x.deepSleepSeconds
+      lightSeconds     = $x.lightSleepSeconds
+      remSeconds       = $x.remSleepSeconds
+      awakeSeconds     = $x.awakeSleepSeconds
+      score            = $sc
+    })
   }
 }
 

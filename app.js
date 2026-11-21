@@ -135,6 +135,13 @@ const days30 = days60.slice(-30);
 const sleepH = days30.map((d) => { const s = sleepMap.get(dayKey(d)); return s && s.sleepTimeSeconds ? s.sleepTimeSeconds / 3600 : null; });
 const lastVals = (arr, n) => arr.slice(-n).filter((v) => v != null);
 const rhr7 = avg(lastVals(rhr, 7)), sleep7 = avg(lastVals(sleepH, 7));
+const sleep30 = days30.map((d) => sleepMap.get(dayKey(d)) || null);
+const sleepScore = (s) => (s && isFinite(s.score) && s.score > 0 ? s.score : null);
+const score7 = avg(lastVals(sleep30.map(sleepScore), 7));
+const PHASES = [['deepSeconds', 'Profond', 'ph-1'], ['lightSeconds', 'Léger', 'series-7'], ['remSeconds', 'Paradoxal', 't-test'], ['awakeSeconds', 'Éveillé', 'warning']];
+const phase7 = PHASES.map(([k]) => avg(lastVals(sleep30.map((s) => (s && isFinite(s[k]) ? s[k] / 3600 : null)), 7)));
+const hasPhases = phase7.slice(0, 3).some((v) => isFinite(v) && v > 0);
+const sleepWeek = (mon) => Array.from({ length: 7 }, (_, i) => sleepMap.get(dayKey(addDays(mon, i)))).filter(Boolean);
 const latestHrv = [...hrv].filter((h) => h.lastNightAvg).sort((a, b) => (a.calendarDate < b.calendarDate ? 1 : -1))[0];
 const zArr = Array.isArray(D.hrZones) ? D.hrZones : [];
 const runZones = zArr.find((z) => z.sport === 'RUNNING') || zArr.find((z) => z.sport === 'DEFAULT');
@@ -205,6 +212,9 @@ if (prev) { const f = feelCount(prev.sessions), heavy = f.dur + 2 * f.tresdur;
 if (heavy >= 3 && levels[w].level >= 0) { levels[w].level = -1; levels[w].feel = { effect: 'down', f }; }
 else if (heavy >= 2 && levels[w].level > 0) { levels[w].level = 0; levels[w].feel = { effect: 'hold', f }; }
 else if (f.n) levels[w].feel = { effect: '', f }; }
+// Sommeil de la semaine précédente : un score moyen sous 60 (au moins 4 nuits) bloque le durcissement.
+if (w > 0) { const sc = sleepWeek(addDays(planStartMon, (w - 1) * 7)).map(sleepScore).filter(Boolean);
+if (sc.length >= 4 && avg(sc) < 60 && levels[w].level > 0) { levels[w].level = 0; levels[w].sleep = Math.round(avg(sc)); } }
 }
 const plan = buildPlan();
 const regul = levels.length ? levels[levels.length - 1] : { level: 0, force: false, avg: null, n: 0 };
@@ -283,6 +293,7 @@ const weekFlags = (w) => `${phaseName(w.phase)}${w.recovery && !w.forced ? ' · 
 const feelTxt = !regul.feel || curWeek.weeksToRace < 3 ? '' : (() => { const f = regul.feel.f, hard = f.dur + f.tresdur;
 const what = hard ? `${hard} séance${hard > 1 ? 's' : ''} notée${hard > 1 ? 's' : ''} dure${hard > 1 ? 's' : ''}` : `${f.n} séance${f.n > 1 ? 's' : ''} notée${f.n > 1 ? 's' : ''}, aucune dure`;
 return ` <br>Ressenti de la semaine dernière : ${what}${regul.feel.effect === 'down' ? ' → programme <b>adouci</b>.' : regul.feel.effect === 'hold' ? ' → pas de durcissement cette semaine.' : '.'}`; })();
+const sleepRegTxt = regul.sleep && curWeek.weeksToRace >= 3 ? ` <br>Sommeil de la semaine dernière : score moyen ${regul.sleep}/100 → pas de durcissement cette semaine.` : '';
 const regulTxt = !regul.n ? 'pas encore de semaine terminée dans le plan : le programme suit sa progression normale. Tes notes commenceront à l\'ajuster dès la semaine prochaine.'
 : `note moyenne ${regul.avg}/100 sur ${regul.n === 1 ? 'la dernière semaine' : `les ${regul.n} dernières semaines`} → ${
 curWeek.weeksToRace < 3 ? 'c\'est l\'affûtage : le programme ne change plus, place à la fraîcheur.'
@@ -292,7 +303,7 @@ curWeek.weeksToRace < 3 ? 'c\'est l\'affûtage : le programme ne change plus, pl
 : regul.level > 0 ? 'programme <b>durci</b> d\'un cran (sortie longue +3 km, séance de qualité plus longue).'
 : regul.level < 0 ? 'programme <b>adouci</b> d\'un cran (sortie longue +1 km, séance de qualité plus courte).'
 : regul.capped ? 'la semaine dernière était déjà durcie : celle-ci reste <b>normale</b> (une semaine durcie sur deux au maximum).'
-: 'programme <b>maintenu</b> tel quel.'}${feelTxt}`;
+: 'programme <b>maintenu</b> tel quel.'}${feelTxt}${sleepRegTxt}`;
 const when = (d) => (+d === +today ? 'aujourd\'hui' : +d === +addDays(today, 1) ? 'demain' : d.toLocaleDateString('fr-FR', { weekday: 'long' }));
 const catchUp = (() => {
 const late = curWeek.sessions.filter((s) => s.late);
@@ -388,6 +399,9 @@ const hm = (h) => { const m = Math.round(h * 60); return `${Math.floor(m / 60)} 
 const z2Txt = hrEasy ? `${hrEasy.lo}-${hrEasy.hi} bpm` : 'zone 2';
 const recoveryTip = (() => {
 if (isFinite(pRhr) && isFinite(baseRhr) && pRhr - baseRhr >= 4) return { t: `Ta FC au repos est montée à ${fmt0(pRhr)} bpm, contre ${fmt0(baseRhr)} d'habitude.`, d: 'Fatigue, manque de sommeil ou début de virus. Garde tes footings vraiment faciles cette semaine et ne force pas la séance de qualité si les jambes sont lourdes.' };
+const pSc = sleepWeek(prevMon).map(sleepScore).filter(Boolean), pDeep = sleepWeek(prevMon).map((s) => s.deepSeconds).filter((x) => isFinite(x) && x > 0);
+if (pSc.length >= 4 && avg(pSc) < 65) return { t: `Score de sommeil moyen de ${fmt0(avg(pSc))}/100 la semaine dernière.`, d: 'Ton sommeil récupère mal en ce moment. Couche-toi à heure fixe, évite écrans et repas lourds tard le soir, et garde la séance de qualité pour un jour après une bonne nuit.' };
+if (pDeep.length >= 4 && avg(pDeep) < 2700) return { t: `Seulement ${hm(avg(pDeep) / 3600)} de sommeil profond par nuit en moyenne.`, d: 'C\'est le sommeil qui répare les muscles. Évite l\'alcool et les séances intenses tard le soir, et vise une chambre fraîche et sombre.' };
 if (pSleep.length >= 4 && avg(pSleep) < 7) return { t: `Tu as dormi ${hm(avg(pSleep))} par nuit en moyenne.`, d: 'C\'est trop peu pour assimiler l\'entraînement. Vise 30 à 45 min de plus, en priorité la veille de la séance de qualité et de la sortie longue.' };
 if (backToBack) return { t: 'Tu as enchaîné deux journées intenses de suite.', d: 'Laisse au moins un jour facile ou de repos entre deux efforts durs, tous sports confondus. C\'est le jour facile qui fait progresser.' };
 if (pOther.filter(isHard).length >= 2) return { t: `${pOther.length} séances hors course la semaine dernière (${otherTxt}).`, d: 'Compte les plus intenses comme des séances dures : garde 48 h entre elles et la sortie longue, sinon tu la courras déjà fatigué.' };
@@ -404,7 +418,7 @@ return { t: `Semaine solide : ${pRuns.length} sorties, ${fmt0(pKm)} km${isFinite
 })();
 const factsTxt = `Semaine du ${prevMon.getDate()} au ${prevEnd.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} : ${pRuns.length} course${pRuns.length > 1 ? 's' : ''}${pRuns.length ? ` (${fmt0(pKm)} km)` : ''}${pOther.length ? ` · ${pOther.length} autre${pOther.length > 1 ? 's' : ''} séance${pOther.length > 1 ? 's' : ''} (${otherTxt})` : ''}${pSleep.length ? ` · sommeil ${hm(avg(pSleep))}` : ''}${pHrv.length ? ` · VFC ${fmt0(avg(pHrv.map((h) => h.lastNightAvg)))} ms` : ''}${isFinite(pRhr) ? ` · FC repos ${fmt0(pRhr)} bpm` : ''}`;
 const tKey = dayKey(today);
-const hrvT = hrvMap.get(tKey), sleepSec = sleepMap.get(tKey)?.sleepTimeSeconds, rhrT = rhrOf(today);
+const hrvT = hrvMap.get(tKey), sleepSec = sleepMap.get(tKey)?.sleepTimeSeconds, sleepSc = sleepScore(sleepMap.get(tKey)), rhrT = rhrOf(today);
 const rhrBase28 = avg(Array.from({ length: 28 }, (_, i) => rhrOf(addDays(today, -1 - i))).filter(Boolean));
 const hrvLowNights = (() => { let n = 0;
 for (let i = 0; i < 7; i++) { const h = hrvMap.get(dayKey(addDays(today, -i))); if (h && h.lastNightAvg && h.baseline?.balancedLow && h.lastNightAvg < h.baseline.balancedLow) n++; else break; }
@@ -413,7 +427,7 @@ const yHard = activities.filter((a) => dayKey(a._date) === dayKey(addDays(today,
 const signals = [];
 if (rhrT) { const d = isFinite(rhrBase28) ? Math.round(rhrT - rhrBase28) : 0;
 signals.push({ k: 'FC repos', v: `${rhrT} bpm`, n: !isFinite(rhrBase28) ? '' : d ? `${Math.abs(d)} de ${d > 0 ? 'plus' : 'moins'} que d'habitude` : 'comme d\'habitude', lv: d >= 5 ? 2 : d >= 3 ? 1 : 0 }); }
-if (sleepSec) { const h = sleepSec / 3600; signals.push({ k: 'Sommeil', v: hm(h), n: '', lv: h < 6 ? 2 : h < 7 ? 1 : 0 }); }
+if (sleepSec) { const h = sleepSec / 3600; signals.push({ k: 'Sommeil', v: hm(h), n: sleepSc ? `score ${sleepSc}` : '', lv: Math.max(h < 6 ? 2 : h < 7 ? 1 : 0, sleepSc ? (sleepSc < 60 ? 2 : sleepSc < 75 ? 1 : 0) : 0) }); }
 const measured = signals.length > 0;
 if (yHard.length) signals.push({ k: 'Hier', v: [...new Set(yHard.map((a) => (isRun(a) ? 'course' : sportName[a.activityType?.typeKey] || 'sport')))].join(', '), n: 'séance intense', lv: 1 });
 if (isFinite(acr) && acr > 1.3) signals.push({ k: 'Charge', v: acr.toFixed(2).replace('.', ','), n: acr > 1.5 ? 'en forte hausse' : 'en hausse', lv: acr > 1.5 ? 2 : 1 });
@@ -587,13 +601,14 @@ app.innerHTML = `
 <nav class="nav" aria-label="Sections de la page">${NAV.map(([id, l, d]) => `<a href="#${id}" data-nav="${id}" class="${id === 'today' ? 'on' : ''}">${svg(d)}<span>${l}</span></a>`).join('')}</nav>
 <div class="top-act">
 <span class="sync ${stale ? 'stale' : ''}" title="Dernière synchro Garmin : ${fetchedTxt}"><i></i><span>Synchro ${ago(ageMs)}</span></span>
+<button type="button" class="icon-btn" id="syncBtn" aria-label="Synchroniser maintenant mes données Garmin" title="Synchroniser maintenant">${svg('<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/>', 'i-sync')}</button>
 <button type="button" class="icon-btn" id="themeBtn" aria-label="Passer du mode nuit au mode jour, ou l'inverse" title="Mode jour / nuit">${
 svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>', 'i-sun')}${
 svg('<path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5a7 7 0 0 0 10 10z"/>', 'i-moon')}</button>
 </div>
 </div></header>
 <main class="wrap">
-${stale ? `<div class="banner" data-tab="today"><b>Synchro en retard.</b> Les dernières données Garmin datent d'${ago(ageMs)}, alors que la mise à jour passe chaque soir à 20 h. Si ça dure, regarde l'onglet Actions de ton dépôt GitHub.</div>` : ''}
+${stale ? `<div class="banner" data-tab="today"><b>Synchro en retard.</b> Les dernières données Garmin datent d'${ago(ageMs)}, alors que la mise à jour passe chaque jour à 9 h et 20 h. Appuie sur le bouton de synchro en haut. Si ça dure, regarde l'onglet Actions de ton dépôt GitHub.</div>` : ''}
 <section class="card today" id="today" data-tab="today">
 <div>
 <div class="eyebrow">Aujourd'hui · ${today.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
@@ -722,15 +737,17 @@ ${gpHist.length >= 2 ? `<div class="chart sm"><canvas id="cGp"></canvas></div>
 : `<p class="note">${gpHist.length ? `Une seule valeur pour l'instant (${fmtDur(gpHist[0].t)} le ${fmtDate(gpHist[0].d)}). La courbe apparaît dès la 2e.` : 'Aucune prédiction saisie.'} Ajoute ta prédiction dans la case « Prédiction du jour » à chaque relevé.</p>`}</section>
 <h1 class="tab-title" data-tab="recup">Récupération</h1>
 <details class="card recovery" id="recovery" data-tab="recup" open>
-<summary><b>Récupération</b><span class="tnum">VFC ${latestHrv?.lastNightAvg ?? '–'} ms · FC repos ${isFinite(rhr7) ? fmt0(rhr7) : '–'} bpm · Sommeil ${isFinite(sleep7) ? fmt1(sleep7) : '–'} h</span></summary>
+<summary><b>Récupération</b><span class="tnum">VFC ${latestHrv?.lastNightAvg ?? '–'} ms · FC repos ${isFinite(rhr7) ? fmt0(rhr7) : '–'} bpm · Sommeil ${isFinite(sleep7) ? fmt1(sleep7) : '–'} h${isFinite(score7) ? ` (score ${fmt0(score7)})` : ''}</span></summary>
 <div class="grid">
 <div class="card span-4"><h2>VFC nocturne</h2><div class="rec-v tnum">${latestHrv?.lastNightAvg ?? '–'}<small>ms la nuit dernière</small></div><div class="sub">60 jours · ms</div><div class="chart sm"><canvas id="cHrv"></canvas></div>
 <div class="legend"><span><span class="sw" style="background:${V('series-7')}"></span>VFC</span><span><span class="sw" style="background:${V('band')}"></span>Plage normale</span></div></div>
-<div class="card span-4"><h2>FC au repos</h2><div class="rec-v tnum">${isFinite(rhr7) ? fmt0(rhr7) : '–'}<small>bpm, moyenne 7 jours</small></div><div class="sub">60 jours · bpm</div><div class="chart sm"><canvas id="cRhr"></canvas></div></div>
-<div class="card span-4"><h2>Sommeil</h2><div class="rec-v tnum">${isFinite(sleep7) ? fmt1(sleep7) : '–'}<small>h par nuit, moyenne 7 jours</small></div><div class="sub">30 jours · heures par nuit</div><div class="chart sm"><canvas id="cSleep"></canvas></div></div>
+<div class="card span-4"><h2>FC au repos</h2><div class="rec-v tnum">${isFinite(rhr7) ? fmt0(rhr7) : '–'}<small>bpm, moyenne 7 jours</small></div><div class="sub">60 jours · bpm · axe inversé : plus haut = mieux</div><div class="chart sm"><canvas id="cRhr"></canvas></div></div>
+<div class="card span-4"><h2>Sommeil</h2><div class="rec-v tnum">${isFinite(sleep7) ? fmt1(sleep7) : '–'}<small>h par nuit, moyenne 7 jours${isFinite(score7) ? ` · score ${fmt0(score7)}` : ''}</small></div><div class="sub">30 jours · heures par nuit</div><div class="chart sm"><canvas id="cSleep"></canvas></div>
+${hasPhases ? (() => { const tot = phase7.reduce((a, v) => a + (isFinite(v) ? v : 0), 0); return `<div class="sl-ph" aria-label="Phases de sommeil, moyenne 7 nuits">${PHASES.map(([, l, c], i) => (isFinite(phase7[i]) && phase7[i] > 0 ? `<i style="flex:${phase7[i] / tot} 0 0;background:${V(c)}"></i>` : '')).join('')}</div>
+<div class="legend">${PHASES.map(([, l, c], i) => (isFinite(phase7[i]) && phase7[i] > 0 ? `<span><span class="sw" style="background:${V(c)}"></span>${l} ${hm(phase7[i])}</span>` : '')).join('')}</div>`; })() : ''}</div>
 </div>
 </details>
-<footer data-tab="all"><span>Données Garmin du ${fetchedTxt}${(D.errors || []).length ? ' · ' + D.errors.length + ' source(s) en erreur' : ''}</span><span>Mise à jour automatique chaque soir à 20 h</span></footer>
+<footer data-tab="all"><span>Données Garmin du ${fetchedTxt}${(D.errors || []).length ? ' · ' + D.errors.length + ' source(s) en erreur' : ''}</span><span>Mise à jour automatique à 9 h et 20 h, ou avec le bouton de synchro</span></footer>
 </main>`;
 setTimeout(() => app.classList.add('settled'), 1500); // ends the entrance animations for good (see styles.css)
 const reduce = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -778,11 +795,13 @@ options: { interaction: hover, scales: { x: scaleX(), y: scaleY() },
 plugins: { tooltip: { filter: (i) => i.datasetIndex === 2, callbacks: { label: (c) => { const lo = hrvLow[c.dataIndex], hi = hrvHigh[c.dataIndex]; return ` ${c.raw} ms${lo && hi ? ` (normale ${lo}–${hi})` : ''}`; } } } } } });
 mk('cRhr', { type: 'line',
 data: { labels: d60Labels, datasets: [{ label: 'FC repos', data: rhr, ...thin(C.serious) }] },
-options: { interaction: hover, scales: { x: scaleX(), y: scaleY() }, plugins: { tooltip: { callbacks: { label: (c) => ` ${c.raw} bpm` } } } } });
+options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ reverse: true }) }, plugins: { tooltip: { callbacks: { label: (c) => ` ${c.raw} bpm` } } } } });
 mk('cSleep', { type: 'bar',
 data: { labels: days30.map(fmtDM), datasets: [{ label: 'Sommeil', data: sleepH.map((v) => (v == null ? null : Math.round(v * 10) / 10)), ...bar(C.s1), maxBarThickness: 10 }] },
-options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ beginAtZero: false, grace: '10%' }) },
-plugins: { tooltip: { callbacks: { label: (c) => ` ${hm(c.raw)}` } } } } });
+options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ min: Math.min(5, Math.floor(Math.min(...sleepH.filter((v) => v != null)))), max: Math.max(9, Math.ceil(Math.max(...sleepH.filter((v) => v != null)))), ticks: { color: C.muted, stepSize: 1, callback: (v) => v + ' h' } }) },
+plugins: { tooltip: { callbacks: { label: (c) => { const s = sleep30[c.dataIndex] || {}, sc = sleepScore(s);
+const ph = PHASES.slice(0, 3).filter(([k]) => isFinite(s[k]) && s[k] > 0).map(([k, l]) => `${l.toLowerCase()} ${hm(s[k] / 3600)}`).join(', ');
+return [` ${hm(c.raw)}${sc ? ` · score ${sc}` : ''}`, ...(ph ? [` ${ph}`] : [])]; } } } } } });
 };
 const recoveryEl = document.getElementById('recovery');
 const show = (key) => { if (!C || drawn.has(key)) return; drawn.add(key); if (key === 'recovery') drawRecovery(); else drawCmp(key); };
