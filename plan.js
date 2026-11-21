@@ -64,24 +64,26 @@ if (!lv) return q;
 const c = JSON.parse(JSON.stringify(q));
 const main = c.steps.find((s) => s.repeat && !s.steps.some((x) => x.name === 'Acceleration'));
 if (!main) return q;
+// lv va de -1 à +1 (note d'adaptation / 100) : ajustement doux, une répétition en plus ou en moins seulement aux extrêmes.
 if (main.repeat >= 4) {
-const n = main.repeat + lv;
+if (Math.abs(lv) < 0.75) return q;
+const n = main.repeat + Math.sign(lv);
 c.title = c.title.replace(/\d+ ×/, `${n} ×`);
 main.repeat = n;
 } else {
 const work = main.steps[0], d = work.dur;
 if (d.type === 'time') {
 const min = d.s / 60;
-let m2 = Math.round(min * (1 + 0.15 * lv)); if (m2 === min) m2 = min + lv;
+let m2 = Math.round(min * (1 + 0.10 * lv)); if (m2 === min) { if (Math.abs(lv) < 0.5) return q; m2 = min + Math.sign(lv); }
 d.s = m2 * 60;
 c.title = c.title.replace(/× [\d,]+ min/, `× ${m2} min`);
 } else {
-d.m = Math.round((d.m * (1 + 0.15 * lv)) / 100) * 100;
+const m0 = d.m; d.m = Math.round((d.m * (1 + 0.10 * lv)) / 100) * 100; if (d.m === m0) return q;
 c.title = c.title.replace(/× [\d,]+ km/, `× ${String(d.m / 1000).replace('.', ',')} km`);
 }
 }
 c.adjusted = lv;
-c.desc += lv > 0 ? ' Séance durcie d\'un cran : tes dernières notes sont excellentes.' : ' Séance allégée d\'un cran, le temps que tes notes remontent.';
+c.desc += lv > 0 ? ' Séance légèrement durcie : tes signaux de forme sont bons.' : ' Séance légèrement allégée, le temps que tes signaux remontent.';
 return c;
 };
 const light = () => Q('Fartlek 6 × 2 min', 'Semaine allégée : du rythme, peu de volume.', [rep(6, run('Rapide', T(2), F.threshold), 60)]);
@@ -148,7 +150,7 @@ const lvEff = recovery || weeksToRace < 3 ? 0 : lv;
 let longKm;
 if (weeksToRace >= 3) {
 const cap = Math.min(maxLongKm, phase === 'base' ? 22 : phase === 'build' ? 28 : o.peakLongRunKm);
-const inc = 2 + lvEff;
+const inc = 2 + (lvEff >= 0.5 ? 1 : lvEff <= -0.5 ? -1 : 0);
 if (recovery) { longKm = Math.round(lastLong * 0.75); prevWasCap = false; }
 else if (hold) longKm = Math.min(cap, lastLong);
 else if (lastLong + inc > cap) {

@@ -166,14 +166,20 @@ const feelKey = (s) => `${dayKey(s.origDate || s.date)}|${s.type}`;
 // Séances déplacées par l'utilisateur : { "jourPrévu|type": index du jour dans la semaine (0 = lundi) }.
 let moves = {}; try { moves = JSON.parse(localStorage.getItem('moves') || '{}') || {}; } catch (e) { /* nothing saved */ }
 const moveKey = (s) => `${dayKey(s.origDate || s.date)}|${s.type}`;
-const applyMoves = (w) => {
-w.sessions.forEach((s) => { s.origDate = s.date; });
-w.sessions.forEach((s) => { const to = moves[moveKey(s)]; if (to == null || s.type === 'race') return;
-const d = addDays(w.monday, to); if (dayKey(d) === dayKey(s.date)) return;
-const other = w.sessions.find((x) => x !== s && x.type !== 'race' && dayKey(x.date) === dayKey(d));
-if (other) other.date = s.date;
-s.date = d; s.moved = true; });
-w.sessions.sort((a, b) => a.date - b.date); };
+// Valeur = jours depuis le lundi de la semaine d'origine (7 et plus = semaine suivante), ou 'x' = séance retirée.
+const applyMovesAll = (weeks) => {
+weeks.forEach((w) => w.sessions.forEach((s) => { s.origDate = s.date; }));
+const later = [];
+weeks.forEach((w) => { w.removed = []; w.sessions = w.sessions.filter((s) => { const to = moves[moveKey(s)];
+if (to == null || s.type === 'race') return true;
+if (to === 'x') { w.removed.push(s); return false; }
+const d = addDays(monday(s.origDate), to), tw = weeks.find((x) => +x.monday === +monday(d));
+if (!tw) return true;
+s.date = d; s.moved = dayKey(d) !== dayKey(s.origDate);
+if (tw !== w) { s.fromPrev = true; later.push([tw, s]); return false; }
+return true; }); });
+later.forEach(([tw, s]) => tw.sessions.push(s));
+weeks.forEach((w) => w.sessions.sort((a, b) => a.date - b.date)); };
 const feelCount = (list) => { const f = { facile: 0, bien: 0, dur: 0, tresdur: 0, n: 0 };
 list.forEach((s) => { const v = feel[feelKey(s)]; if (v && f[v] !== undefined) { f[v]++; f.n++; } }); return f; };
 const adjustOf = (w) => {
@@ -199,8 +205,8 @@ startLongKm: R.startLongKm || 12, longRunDay: R.longRunDay || 'SUNDAY',
 paces, easyPace, longPace, hrEasy, phaseOf: phaseAt, holdWeeks, adjust: SC ? adjustOf : null
 });
 curRanges = plan.ranges;
+applyMovesAll(plan.weeks);
 plan.weeks.forEach((w) => {
-applyMoves(w);
 const all = weekRuns(w.monday), over = addDays(w.monday, 7) <= today;
 const pick = all.length ? pairUp(w.sessions, all) : [];
 w.sessions.forEach((s, i) => {
@@ -214,19 +220,40 @@ w.doneCount = w.sessions.filter((s) => s.run).length;
 w.score = SC ? SC.weekScore(w.sessions) : null;
 });
 return plan; };
+// ===== Forme / fatigue / fraîcheur : un des signaux de l'auto-régulation =====
+const ff = (() => { if (!activities.length) return [];
+let d = startOfDay(activities.reduce((m, a) => (a._date < m ? a._date : m), today)), ctl = 0, atl = 0; const out = [];
+for (; d <= today; d = addDays(d, 1)) { const l = loadOn.get(dayKey(d)) || 0; ctl += (l - ctl) / 42; atl += (l - atl) / 7; out.push({ d, ctl, atl, tsb: ctl - atl }); }
+return out; })();
+// ===== Auto-régulation : une note d'adaptation de -100 à +100, qui combine tous les signaux =====
+// Chaque signal donne une valeur de -1 à +1, pondérée. Un signal seul ne peut pas faire basculer le plan,
+// et l'ajustement reste doux : quelques minutes de qualité, ±1 km de sortie longue seulement au-delà de ±50.
+const ffAt = new Map(ff.map((x) => [dayKey(x.d), x]));
+const rhrAt = (d) => dailyMap.get(dayKey(d))?.heartRate?.restingValue;
+const SIG = [['scores', 'Notes des séances', 35], ['feel', 'Ressentis', 25], ['fresh', 'Fraîcheur', 15], ['sleep', 'Sommeil', 15], ['rhr', 'FC repos', 10]];
+const cl1 = (v) => Math.max(-1, Math.min(1, v));
+const sgn = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + fmt0(Math.abs(v));
 if (SC) for (let w = 0; w <= curWeekIdx; w++) {
 const p = buildPlan();
-levels[w] = SC.decide(p.weeks.slice(Math.max(0, w - 3), w).map((x) => x.score).filter(Boolean));
-if (levels[w].level > 0 && w > 0 && levels[w - 1].level > 0) { levels[w].level = 0; levels[w].capped = true; }
-// Ressenti noté après les séances de la semaine précédente : 2 « dur » (ou 1 « très dur ») bloquent le durcissement, 3 points adoucissent.
-const prev = w > 0 ? p.weeks[w - 1] : null;
-if (prev) { const f = feelCount(prev.sessions), heavy = f.dur + 2 * f.tresdur;
-if (heavy >= 3 && levels[w].level >= 0) { levels[w].level = -1; levels[w].feel = { effect: 'down', f }; }
-else if (heavy >= 2 && levels[w].level > 0) { levels[w].level = 0; levels[w].feel = { effect: 'hold', f }; }
-else if (f.n) levels[w].feel = { effect: '', f }; }
-// Sommeil de la semaine précédente : un score moyen sous 60 (au moins 4 nuits) bloque le durcissement.
-if (w > 0) { const sc = sleepWeek(addDays(planStartMon, (w - 1) * 7)).map(sleepScore).filter(Boolean);
-if (sc.length >= 4 && avg(sc) < 60 && levels[w].level > 0) { levels[w].level = 0; levels[w].sleep = Math.round(avg(sc)); } }
+const hist = p.weeks.slice(Math.max(0, w - 3), w).map((x) => x.score).filter(Boolean);
+const d = SC.decide(hist);
+const mon = addDays(planStartMon, w * 7), pmon = addDays(mon, -7), prev = w > 0 ? p.weeks[w - 1] : null, sig = {};
+if (d.n) sig.scores = { v: cl1((d.avg - 75) / 12), txt: `${d.avg}/100 de moyenne` };
+if (prev) { const f = feelCount(prev.sessions);
+if (f.n) sig.feel = { v: cl1((f.facile - 0 + 0.4 * f.bien - 0.6 * f.dur - f.tresdur) / f.n), txt: `${f.n} noté${f.n > 1 ? 's' : ''}${f.dur + f.tresdur ? `, ${f.dur + f.tresdur} dur${f.dur + f.tresdur > 1 ? 's' : ''}` : ''}` }; }
+const fx = ffAt.get(dayKey(addDays(mon, -1)));
+if (fx && ff.length >= 28) sig.fresh = { v: cl1((fx.tsb + 10) / 20), txt: `fraîcheur ${sgn(Math.round(fx.tsb))}` };
+if (w > 0) { const sc = sleepWeek(pmon).map(sleepScore).filter(Boolean);
+if (sc.length >= 4) sig.sleep = { v: cl1((avg(sc) - 70) / 15), txt: `score moyen ${Math.round(avg(sc))}` }; }
+const r7 = avg(Array.from({ length: 7 }, (_, i) => rhrAt(addDays(pmon, i))).filter(Boolean));
+const r28 = avg(Array.from({ length: 28 }, (_, i) => rhrAt(addDays(pmon, -1 - i))).filter(Boolean));
+if (w > 0 && isFinite(r7) && isFinite(r28)) { const dd = r7 - r28; sig.rhr = { v: Math.min(0.5, cl1(-(dd - 0.5) / 4)), txt: Math.abs(dd) < 1 ? 'stable' : `${dd > 0 ? '+' : '−'}${fmt0(Math.abs(dd))} bpm` }; }
+const used = SIG.filter(([k]) => sig[k]), wsum = used.reduce((a, x) => a + x[2], 0);
+let index = d.n && wsum >= 35 ? Math.round((100 * used.reduce((a, [k, , wt]) => a + wt * sig[k].v, 0)) / wsum) : 0;
+if (hist.length && hist[hist.length - 1].missed) index = Math.min(index, -25);
+let level = Math.abs(index) < 15 ? 0 : index / 100, capped = false;
+if (level > 0 && w > 0 && levels[w - 1] && levels[w - 1].level > 0) { level = 0; capped = true; }
+levels[w] = { level, force: d.force || index <= -70, avg: d.avg, n: d.n, index, sig, wsum, capped };
 }
 const plan = buildPlan();
 const regul = levels.length ? levels[levels.length - 1] : { level: 0, force: false, avg: null, n: 0 };
@@ -283,14 +310,34 @@ const feelHtml = (s, i) => { if (s.type === 'race' || s.missed) return '';
 const cur = feel[feelKey(s)], future = s.date > today;
 return `<div class="feel" role="group" aria-label="Ressenti de la séance"><span class="feel-k">${future ? 'À noter après la séance' : 'Ton ressenti'}</span><span class="feel-b">${FEELS.map(([v, l]) => `<button type="button" class="feel-o f-${v}${cur === v ? ' on' : ''}" data-feel="${i}" data-v="${v}" aria-pressed="${cur === v}"${future ? ' disabled' : ''}>${l}</button>`).join('')}</span></div>`; };
 const DOW = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
-const moveHtml = (s, i) => { if (s.run || s.missed || s.type === 'race') return '';
-const w = plan.weeks.find((x) => x.sessions.includes(s)); if (!w) return '';
-const cur = Math.round((startOfDay(s.date) - w.monday) / DAY);
-const chips = DOW.map((l, k) => { const d = addDays(w.monday, k), past = d < today;
+const MK = window.MoveKit;
+const weekOfS = (s) => plan.weeks.find((x) => x.sessions.includes(s));
+const dayIn = (w, d) => Math.round((startOfDay(d) - w.monday) / DAY);
+const mvItems = (w) => w.sessions.map((x) => ({ s: x, id: moveKey(x), day: dayIn(w, x.date), hard: x.type !== 'easy', fixed: !!x.run || x.type === 'race' || x.date < today, label: typeLabel[x.type] }));
+const moveHtml = (s, i) => { if (s.run || s.missed || s.type === 'race' || !MK) return '';
+const w = weekOfS(s); if (!w) return '';
+const at = dayIn(w, s.date), wi = plan.weeks.indexOf(w), hasNext = wi < plan.weeks.length - 1 && plan.weeks[wi + 1].weeksToRace > 0;
+const chips = DOW.map((l, k) => { const d = addDays(w.monday, k), fixed = w.sessions.some((x) => x !== s && dayKey(x.date) === dayKey(d) && (x.run || x.type === 'race'));
 const busy = w.sessions.some((x) => x !== s && dayKey(x.date) === dayKey(d));
-return `<button type="button" class="mv-d${k === cur ? ' on' : ''}" data-mv="${i}" data-to="${k}"${past || k === cur ? ' disabled' : ''} title="${busy ? 'échange avec la séance de ce jour' : ''}">${l}<small>${d.getDate()}</small>${busy ? '<i>⇄</i>' : ''}</button>`; }).join('');
-return `<details class="move"><summary>${s.moved ? `Déplacée (prévue ${s.origDate.toLocaleDateString('fr-FR', { weekday: 'long' })}) · changer` : 'Déplacer cette séance'}</summary>
-<div class="mv-days">${chips}</div>${s.moved ? `<button type="button" class="btn mv-reset" data-mvreset="${i}">Remettre au jour prévu</button>` : ''}<p class="note">⇄ = échange avec la séance déjà prévue ce jour-là.</p></details>`; };
+return `<button type="button" class="mv-d${k === at ? ' on' : ''}" data-mv="${i}" data-to="${k}"${d < today || k === at || fixed ? ' disabled' : ''}>${l}<small>${d.getDate()}</small>${busy ? '<i>•</i>' : ''}</button>`; }).join('');
+return `<details class="move"><summary>${s.moved ? `Déplacée (prévue ${s.origDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric' })}) · changer` : 'Déplacer cette séance'}</summary>
+<div class="mv-days">${chips}</div>
+<div class="mv-acts">${hasNext ? `<button type="button" class="btn sm" data-mvnext="${i}">À la semaine prochaine</button>` : ''}<button type="button" class="btn sm" data-mvdel="${i}">Supprimer</button>${s.moved ? `<button type="button" class="btn sm" data-mvreset="${i}">Remettre au jour prévu</button>` : ''}</div>
+<div class="mv-out" hidden></div><p class="note">• = une séance est déjà prévue ce jour-là : les autres se décalent si besoin, pour garder 48 h entre deux séances dures.</p></details>`; };
+const saveMoves = () => { try { localStorage.setItem('moves', JSON.stringify(moves)); } catch (err) { /* private mode */ } location.hash = '#plan'; location.reload(); };
+const toVal = (s, d) => Math.round((startOfDay(d) - monday(s.origDate)) / DAY);
+// Met une séance dans la semaine suivante, au même jour si possible. Retourne false s'il n'y a pas de place.
+const pushNext = (s) => { const w = weekOfS(s), w2 = plan.weeks[plan.weeks.indexOf(w) + 1]; if (!w2 || w2.weeksToRace === 0) return false;
+const sl = MK.slot(mvItems(w2), dayIn(w, s.date), s.type !== 'easy', 0); if (!sl) return false;
+moves[moveKey(s)] = toVal(s, addDays(w2.monday, sl.day)); return true; };
+let pendingMove = null;
+const proposeMove = (s, to, box) => { const w = weekOfS(s), items = mvItems(w), minDay = Math.max(0, dayIn(w, today));
+const r = MK.place(items, moveKey(s), to, minDay);
+const commit = (skip) => { items.forEach((x) => { const d = r.res[x.id]; if (d == null || x.fixed || x === skip) return; if (d !== x.day || x.id === moveKey(s)) moves[x.id] = toVal(x.s, addDays(w.monday, d)); }); };
+pendingMove = { r, commit, s };
+const h = MK.html(r, typeLabel[s.type], to);
+if (!h) { commit(); saveMoves(); return; }
+box.innerHTML = h; box.hidden = false; };
 const sessionCard = (s, forceOpen) => {
 const i = allSessions.indexOf(s);
 const isNext = s === nextSession;
@@ -325,22 +372,24 @@ ${canDownload ? `<button type="button" class="btn fit-btn ${isNext ? 'primary' :
 </div>` : ''}
 </div>`;
 };
-const levelTxt = (w) => (w.forced ? 'récup forcée' : w.level > 0 ? 'durcie' : w.level < 0 ? 'adoucie' : '');
+const levelTxt = (w) => (w.forced ? 'récup forcée' : w.level > 0 ? 'durcie' : w.level < 0 ? 'allégée' : '');
 const weekFlags = (w) => `${phaseName(w.phase)}${w.recovery && !w.forced ? ' · allégée' : ''}${w.hold ? ' · répétée' : ''}${levelTxt(w) ? ' · ' + levelTxt(w) : ''}`;
-const feelTxt = !regul.feel || curWeek.weeksToRace < 3 ? '' : (() => { const f = regul.feel.f, hard = f.dur + f.tresdur;
-const what = hard ? `${hard} séance${hard > 1 ? 's' : ''} notée${hard > 1 ? 's' : ''} dure${hard > 1 ? 's' : ''}` : `${f.n} séance${f.n > 1 ? 's' : ''} notée${f.n > 1 ? 's' : ''}, aucune dure`;
-return ` <br>Ressenti de la semaine dernière : ${what}${regul.feel.effect === 'down' ? ' → programme <b>adouci</b>.' : regul.feel.effect === 'hold' ? ' → pas de durcissement cette semaine.' : '.'}`; })();
-const sleepRegTxt = regul.sleep && curWeek.weeksToRace >= 3 ? ` <br>Sommeil de la semaine dernière : score moyen ${regul.sleep}/100 → pas de durcissement cette semaine.` : '';
-const regulTxt = !regul.n ? 'pas encore de semaine terminée dans le plan : le programme suit sa progression normale. Tes notes commenceront à l\'ajuster dès la semaine prochaine.'
-: `note moyenne ${regul.avg}/100 sur ${regul.n === 1 ? 'la dernière semaine' : `les ${regul.n} dernières semaines`} → ${
+const levelWord = (l) => (Math.abs(l) >= 0.5 ? '' : 'légèrement ');
+const regulTxt = !regul.n ? 'pas encore de semaine terminée dans le plan : le programme suit sa progression normale. L\'ajustement commencera dès la semaine prochaine.'
+: `note d'adaptation <b>${sgn(regul.index)}</b> → ${
 curWeek.weeksToRace < 3 ? 'c\'est l\'affûtage : le programme ne change plus, place à la fraîcheur.'
-: curWeek.forced ? 'deux semaines sous 50 : semaine de récupération imposée.'
-: curWeek.hold ? `moins de 2 sorties la semaine dernière : cette semaine <b>répète</b> la précédente${curWeek.level < 0 ? ', en version adoucie' : ''}.`
+: curWeek.forced ? 'signaux très bas : semaine de récupération imposée.'
+: curWeek.hold ? `moins de 2 sorties la semaine dernière : cette semaine <b>répète</b> la précédente${curWeek.level < 0 ? ', en version allégée' : ''}.`
 : curWeek.recovery ? 'semaine <b>allégée</b>, déjà prévue au plan.'
-: regul.level > 0 ? 'programme <b>durci</b> d\'un cran (sortie longue +3 km, séance de qualité plus longue).'
-: regul.level < 0 ? 'programme <b>adouci</b> d\'un cran (sortie longue +1 km, séance de qualité plus courte).'
+: regul.level > 0 ? `programme <b>${levelWord(regul.level)}durci</b> (séance de qualité un peu plus longue${regul.level >= 0.5 ? ', sortie longue +1 km' : ''}).`
+: regul.level < 0 ? `programme <b>${levelWord(regul.level)}allégé</b> (séance de qualité un peu plus courte${regul.level <= -0.5 ? ', sortie longue −1 km' : ''}).`
 : regul.capped ? 'la semaine dernière était déjà durcie : celle-ci reste <b>normale</b> (une semaine durcie sur deux au maximum).'
-: 'programme <b>maintenu</b> tel quel.'}${feelTxt}${sleepRegTxt}`;
+: 'programme <b>maintenu</b> tel quel.'}`;
+const sigHtml = !regul.n || !regul.sig ? '' : `<details class="sigw"><summary>Ce qui a pesé cette semaine</summary><div class="sigw-list">${SIG.map(([k, l, wt]) => { const x = regul.sig[k];
+if (!x) return `<div class="sw-row off"><span>${l}</span><span class="sw-bar"></span><span class="note">pas de donnée</span></div>`;
+const pts = Math.round((100 * wt * x.v) / regul.wsum);
+return `<div class="sw-row"><span>${l}</span><span class="sw-bar"><i class="${pts >= 0 ? 'up' : 'down'}" style="${pts >= 0 ? 'left:50%' : `right:50%`};width:${Math.min(50, Math.abs(pts))}%"></i></span><span class="tnum"><b>${sgn(pts)}</b> · ${esc(x.txt)}</span></div>`; }).join('')}</div>
+<p class="note">Chaque signal pèse selon son importance : un seul ne peut pas faire basculer le plan. Entre −15 et +15, rien ne change.</p></details>`;
 const when = (d) => (+d === +today ? 'aujourd\'hui' : +d === +addDays(today, 1) ? 'demain' : d.toLocaleDateString('fr-FR', { weekday: 'long' }));
 const catchUp = (() => {
 const late = curWeek.sessions.filter((s) => s.late);
@@ -367,7 +416,7 @@ const strengthHtml = `<details class="renfo"><summary><b>Renforcement</b> · <sp
 <ol><li><b>Gainage planche</b> 3 × 30-45 s</li><li><b>Gainage latéral</b> 2 × 30 s par côté</li><li><b>Squat</b> 3 × 12</li><li><b>Fentes arrière</b> 3 × 10 par jambe</li><li><b>Pont fessier sur une jambe</b> 3 × 10 par jambe</li><li><b>Mollets sur une marche</b> 3 × 15, descente lente sur 3 s</li></ol>
 <p class="note">15 à 20 min, un jour sans séance dure, jamais la veille de la sortie longue. Enregistre-la sur ta montre en « Musculation » pour qu'elle soit comptée.</p></details>`;
 const regulHtml = [
-SC ? { c: curWeek.forced ? 'low' : curWeek.level > 0 ? 'top' : curWeek.level < 0 || curWeek.hold ? 'mid' : '', t: `<b>Auto-régulation</b> · ${regulTxt}` } : null,
+SC ? { c: curWeek.forced ? 'low' : curWeek.level > 0 ? 'top' : curWeek.level < 0 || curWeek.hold ? 'mid' : '', t: `<b>Auto-régulation</b> · ${regulTxt}${sigHtml}` } : null,
 catchUp ? { c: 'mid', t: `<b>Rattrapage</b> · ${catchUp}` } : null,
 { c: strengthN >= STRENGTH_GOAL ? 'top' : strengthN ? 'mid' : '', t: strengthHtml }
 ].filter(Boolean).map((n) => `<div class="regul ${n.c}">${n.t}</div>`).join('');
@@ -434,26 +483,62 @@ const sportName = { soccer: 'foot', hiit: 'HIIT', strength_training: 'renfo', hi
 const otherTxt = [...new Set(pOther.map((a) => sportName[a.activityType?.typeKey] || 'autre sport'))].join(', ');
 const hm = (h) => { const m = Math.round(h * 60); return `${Math.floor(m / 60)} h ${pad(m % 60)}`; };
 const z2Txt = hrEasy ? `${hrEasy.lo}-${hrEasy.hi} bpm` : 'zone 2';
-const recoveryTip = (() => {
-if (isFinite(pRhr) && isFinite(baseRhr) && pRhr - baseRhr >= 4) return { t: `Ta FC au repos est montée à ${fmt0(pRhr)} bpm, contre ${fmt0(baseRhr)} d'habitude.`, d: 'Fatigue, manque de sommeil ou début de virus. Garde tes footings vraiment faciles cette semaine et ne force pas la séance de qualité si les jambes sont lourdes.' };
+const recoveryTips = (() => { const out = [];
+if (isFinite(pRhr) && isFinite(baseRhr) && pRhr - baseRhr >= 4) out.push({ t: `Ta FC au repos est montée à ${fmt0(pRhr)} bpm, contre ${fmt0(baseRhr)} d'habitude.`, d: 'Fatigue, manque de sommeil ou début de virus. Garde tes footings vraiment faciles cette semaine et ne force pas la séance de qualité si les jambes sont lourdes.' });
 const pSc = sleepWeek(prevMon).map(sleepScore).filter(Boolean), pDeep = sleepWeek(prevMon).map((s) => s.deepSeconds).filter((x) => isFinite(x) && x > 0);
-if (pSc.length >= 4 && avg(pSc) < 65) return { t: `Score de sommeil moyen de ${fmt0(avg(pSc))}/100 la semaine dernière.`, d: 'Ton sommeil récupère mal en ce moment. Couche-toi à heure fixe, évite écrans et repas lourds tard le soir, et garde la séance de qualité pour un jour après une bonne nuit.' };
-if (pDeep.length >= 4 && avg(pDeep) < 2700) return { t: `Seulement ${hm(avg(pDeep) / 3600)} de sommeil profond par nuit en moyenne.`, d: 'C\'est le sommeil qui répare les muscles. Évite l\'alcool et les séances intenses tard le soir, et vise une chambre fraîche et sombre.' };
-if (pSleep.length >= 4 && avg(pSleep) < 7) return { t: `Tu as dormi ${hm(avg(pSleep))} par nuit en moyenne.`, d: 'C\'est trop peu pour assimiler l\'entraînement. Vise 30 à 45 min de plus, en priorité la veille de la séance de qualité et de la sortie longue.' };
-if (backToBack) return { t: 'Tu as enchaîné deux journées intenses de suite.', d: 'Laisse au moins un jour facile ou de repos entre deux efforts durs, tous sports confondus. C\'est le jour facile qui fait progresser.' };
-if (pOther.filter(isHard).length >= 2) return { t: `${pOther.length} séances hors course la semaine dernière (${otherTxt}).`, d: 'Compte les plus intenses comme des séances dures : garde 48 h entre elles et la sortie longue, sinon tu la courras déjà fatigué.' };
-return { t: `Signaux au vert${pSleep.length ? ` : ${hm(avg(pSleep))} de sommeil par nuit` : ''}.`, d: 'Protège cet état : une journée complète sans sport le lendemain de la sortie longue, et mange dans l\'heure qui suit tes séances de plus d\'une heure.' };
+if (pSc.length >= 4 && avg(pSc) < 65) out.push({ t: `Score de sommeil moyen de ${fmt0(avg(pSc))}/100 la semaine dernière.`, d: 'Ton sommeil récupère mal en ce moment. Couche-toi à heure fixe, évite écrans et repas lourds tard le soir, et garde la séance de qualité pour un jour après une bonne nuit.' });
+if (pDeep.length >= 4 && avg(pDeep) < 2700) out.push({ t: `Seulement ${hm(avg(pDeep) / 3600)} de sommeil profond par nuit en moyenne.`, d: 'C\'est le sommeil qui répare les muscles. Évite l\'alcool et les séances intenses tard le soir, et vise une chambre fraîche et sombre.' });
+if (pSleep.length >= 4 && avg(pSleep) < 7) out.push({ t: `Tu as dormi ${hm(avg(pSleep))} par nuit en moyenne.`, d: 'C\'est trop peu pour assimiler l\'entraînement. Vise 30 à 45 min de plus, en priorité la veille de la séance de qualité et de la sortie longue.' });
+if (backToBack) out.push({ t: 'Tu as enchaîné deux journées intenses de suite.', d: 'Laisse au moins un jour facile ou de repos entre deux efforts durs, tous sports confondus. C\'est le jour facile qui fait progresser.' });
+if (pOther.filter(isHard).length >= 2) out.push({ t: `${pOther.length} séances hors course la semaine dernière (${otherTxt}).`, d: 'Compte les plus intenses comme des séances dures : garde 48 h entre elles et la sortie longue, sinon tu la courras déjà fatigué.' });
+if (!out.length) out.push({ t: `Signaux au vert${pSleep.length ? ` : ${hm(avg(pSleep))} de sommeil par nuit` : ''}.`, d: 'Protège cet état : une journée complète sans sport le lendemain de la sortie longue, et mange dans l\'heure qui suit tes séances de plus d\'une heure.' }); return out;
 })();
-const trainingTip = (() => {
-if (!pRuns.length) return { t: `Aucune course la semaine dernière${lastRun && lastRun._date < prevMon ? ` : ta dernière sortie datait du ${fmtDate(lastRun._date).replace(/\.$/, '')}` : ''}.`, d: `Reprends avec les 3 séances prévues, sans chercher à rattraper. Sur la séance de qualité, reste à ${fmtPace(paces.threshold.fast)}-${fmtPace(paces.threshold.slow)}/km même si ça paraît facile : tes jambes ont perdu un peu de rythme.` };
-if (prevPlanWeek && prevPlanWeek.doneCount < 2) return { t: `${prevPlanWeek.doneCount} séance sur ${prevPlanWeek.sessions.length} la semaine dernière.`, d: 'La régularité compte plus que n\'importe quelle séance. Si tu dois en sauter une cette semaine, saute le footing, jamais la sortie longue.' };
-if (isFinite(pEasy) && pEasy < EASY_TARGET - 0.15) return { t: `${Math.round(pEasy * 100)} % de ton temps de course en zones 1-2, pour environ ${Math.round(EASY_TARGET * 100)} % visés.`, d: `Avec 3 sorties par semaine, pas besoin de 80 %, mais la sortie longue doit rester majoritairement facile. Garde sa partie endurance sous ${hrCap ? hrCap - 6 : 160} bpm, et les blocs soutenus sous ${runZones && runZones.zone4Floor ? runZones.zone4Floor : 166} bpm.` };
-if (prev3 > 5 && pKm > prev3 * 1.3) return { t: `${fmt0(pKm)} km la semaine dernière, contre ${fmt0(prev3)} km en moyenne avant.`, d: 'C\'est une hausse rapide. Tiens-toi au volume prévu cette semaine, sans rien ajouter, pour laisser tes tendons s\'adapter.' };
+const trainingTips = (() => { const out = [];
+if (!pRuns.length) out.push({ t: `Aucune course la semaine dernière${lastRun && lastRun._date < prevMon ? ` : ta dernière sortie datait du ${fmtDate(lastRun._date).replace(/\.$/, '')}` : ''}.`, d: `Reprends avec les 3 séances prévues, sans chercher à rattraper. Sur la séance de qualité, reste à ${fmtPace(paces.threshold.fast)}-${fmtPace(paces.threshold.slow)}/km même si ça paraît facile : tes jambes ont perdu un peu de rythme.` });
+if (prevPlanWeek && prevPlanWeek.doneCount < 2) out.push({ t: `${prevPlanWeek.doneCount} séance sur ${prevPlanWeek.sessions.length} la semaine dernière.`, d: 'La régularité compte plus que n\'importe quelle séance. Si tu dois en sauter une cette semaine, saute le footing, jamais la sortie longue.' });
+if (isFinite(pEasy) && pEasy < EASY_TARGET - 0.15) out.push({ t: `${Math.round(pEasy * 100)} % de ton temps de course en zones 1-2, pour environ ${Math.round(EASY_TARGET * 100)} % visés.`, d: `Avec 3 sorties par semaine, pas besoin de 80 %, mais la sortie longue doit rester majoritairement facile. Garde sa partie endurance sous ${hrCap ? hrCap - 6 : 160} bpm, et les blocs soutenus sous ${runZones && runZones.zone4Floor ? runZones.zone4Floor : 166} bpm.` });
+if (prev3 > 5 && pKm > prev3 * 1.3) out.push({ t: `${fmt0(pKm)} km la semaine dernière, contre ${fmt0(prev3)} km en moyenne avant.`, d: 'C\'est une hausse rapide. Tiens-toi au volume prévu cette semaine, sans rien ajouter, pour laisser tes tendons s\'adapter.' });
 const longDone = Math.max(0, ...pRuns.map((r) => km(r.distance)));
-if (prevPlanWeek && longDone < prevPlanWeek.longKm * 0.8 && prevPlanWeek.longKm) return { t: `Ta plus longue sortie a fait ${fmt1(longDone)} km pour ${prevPlanWeek.longKm} prévus.`, d: 'La sortie longue est la séance clé du marathon. Cette semaine, protège-la : bloque le créneau et pars lentement.' };
-return { t: `Semaine solide : ${pRuns.length} sorties, ${fmt0(pKm)} km${isFinite(pEasy) ? `, ${Math.round(pEasy * 100)} % en zones 1-2` : ''}.`, d: current.key === 'base' ? 'Continue pareil. Sur la sortie longue, les blocs soutenus doivent rester confortables : si tu finis sans marge, tu es parti trop vite.' : 'Continue pareil. Sur les blocs à allure marathon, vise la régularité au kilomètre plutôt que la vitesse.' };
+if (prevPlanWeek && longDone < prevPlanWeek.longKm * 0.8 && prevPlanWeek.longKm) out.push({ t: `Ta plus longue sortie a fait ${fmt1(longDone)} km pour ${prevPlanWeek.longKm} prévus.`, d: 'La sortie longue est la séance clé du marathon. Cette semaine, protège-la : bloque le créneau et pars lentement.' });
+if (!out.length) out.push({ t: `Semaine solide : ${pRuns.length} sorties, ${fmt0(pKm)} km${isFinite(pEasy) ? `, ${Math.round(pEasy * 100)} % en zones 1-2` : ''}.`, d: current.key === 'base' ? 'Continue pareil. Sur la sortie longue, les blocs soutenus doivent rester confortables : si tu finis sans marge, tu es parti trop vite.' : 'Continue pareil. Sur les blocs à allure marathon, vise la régularité au kilomètre plutôt que la vitesse.' }); return out;
 })();
 const factsTxt = `Semaine du ${prevMon.getDate()} au ${prevEnd.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} : ${pRuns.length} course${pRuns.length > 1 ? 's' : ''}${pRuns.length ? ` (${fmt0(pKm)} km)` : ''}${pOther.length ? ` · ${pOther.length} autre${pOther.length > 1 ? 's' : ''} séance${pOther.length > 1 ? 's' : ''} (${otherTxt})` : ''}${pSleep.length ? ` · sommeil ${hm(avg(pSleep))}` : ''}${pHrv.length ? ` · VFC ${fmt0(avg(pHrv.map((h) => h.lastNightAvg)))} ms` : ''}${isFinite(pRhr) ? ` · FC repos ${fmt0(pRhr)} bpm` : ''}`;
+// Conseils du coach : 3 blocs, jusqu'à 3 conseils chacun, du plus important au moins important.
+const strip = (h) => String(h).replace(/<[^>]+>/g, '');
+const pastTips = [];
+for (let k = 0; k < 3; k++) { if (recoveryTips[k]) pastTips.push({ ...recoveryTips[k], k: 'Récup' }); if (trainingTips[k]) pastTips.push({ ...trainingTips[k], k: 'Entraînement' }); }
+const weekTips = (() => { const out = [], wtr = curWeek.weeksToRace;
+const todo = curWeek.sessions.filter((x) => !x.run && x.date >= today && x.type !== 'race');
+const key1 = todo.find((x) => x.type === 'long') || todo.find((x) => x.type !== 'easy');
+if (key1) out.push({ k: 'Séance clé', t: `${key1.title}, ${when(key1.date)}.`, d: key1.desc });
+out.push({ k: 'Phase', t: `${current.name} · ${wtr > 0 ? `${wtr} semaine${wtr > 1 ? 's' : ''} avant ${R.name || 'la course'}` : 'semaine de la course'}.`, d: strip(current.advice).replace(/^[^.]+\.\s*/, '') });
+if (regul.n && wtr >= 3) out.push({ k: 'Ajustement', t: `Note d'adaptation ${sgn(regul.index)} cette semaine.`, d: strip(regulTxt).replace(/^note d'adaptation [^→]+→\s*/, '').replace(/^./, (c) => c.toUpperCase()) });
+else out.push({ k: 'Volume', t: `${fmt1(curWeek.doneKm)} km faits sur ${curWeek.targetKm} prévus.`, d: todo.length ? `Encore ${todo.length} séance${todo.length > 1 ? 's' : ''} cette semaine. Si tu dois en sauter une, saute le footing, jamais la sortie longue.` : 'Semaine bouclée : place à la récupération.' });
+return out.slice(0, 3); })();
+const trendTips = (() => { const out = [];
+const kmIn = (from, n) => runs.filter((r) => r._date >= addDays(from, -n + 1) && r._date <= from).reduce((a, r) => a + km(r.distance), 0);
+const k28 = kmIn(addDays(today, -1), 28), kPrev = kmIn(addDays(today, -29), 28);
+if (k28 || kPrev) { const ch = kPrev ? (k28 - kPrev) / kPrev : 0;
+out.push({ k: 'Volume', w: Math.abs(ch), t: `${fmt0(k28)} km sur 4 semaines${kPrev ? `, ${ch >= 0 ? '+' : '−'}${Math.round(Math.abs(ch) * 100)} % par rapport aux 4 d'avant` : ''}.`,
+d: ch > 0.3 ? 'Hausse rapide : tiens-toi au volume prévu, sans rien ajouter, pour laisser tendons et mollets s\'adapter.' : ch < -0.25 ? 'Volume en baisse : si ce n\'est pas voulu, reviens d\'abord à la régularité avant d\'allonger les sorties.' : 'Progression maîtrisée : c\'est exactement ce qu\'il faut.' }); }
+const last4 = plan.weeks.slice(Math.max(0, curWeekIdx - 4), curWeekIdx), due4 = last4.flatMap((w) => w.sessions.filter((x) => x.type !== 'race')), done4 = due4.filter((x) => x.run).length;
+if (due4.length) { const r = done4 / due4.length;
+out.push({ k: 'Régularité', w: 1 - r, t: `${done4} séance${done4 > 1 ? 's' : ''} faite${done4 > 1 ? 's' : ''} sur ${due4.length} ces 4 dernières semaines.`,
+d: r >= 0.9 ? 'Excellent : la régularité fait plus progresser que n\'importe quelle séance.' : r >= 0.7 ? 'Correct. Protège en priorité la sortie longue et la séance de qualité.' : 'C\'est le point à travailler : mieux vaut 3 séances faites qu\'un plan parfait sur le papier. Déplace plutôt que de sauter.' }); }
+const slp = (from, n) => Array.from({ length: n }, (_, i) => sleepMap.get(dayKey(addDays(from, -i)))).filter(Boolean);
+const s28 = slp(today, 28), sPrev = slp(addDays(today, -28), 28), sc28 = avg(s28.map(sleepScore).filter(Boolean)), h28 = avg(s28.map((x) => x.sleepTimeSeconds).filter(Boolean)) / 3600;
+const r28 = avg(Array.from({ length: 28 }, (_, i) => rhrAt(addDays(today, -i))).filter(Boolean)), rPrev = avg(Array.from({ length: 28 }, (_, i) => rhrAt(addDays(today, -28 - i))).filter(Boolean));
+if (isFinite(h28)) { const dr = isFinite(r28) && isFinite(rPrev) ? r28 - rPrev : 0, bad = (isFinite(sc28) && sc28 < 70) || dr >= 2;
+out.push({ k: 'Récupération', w: bad ? 0.5 : 0.1, t: `${hm(h28)} de sommeil par nuit${isFinite(sc28) ? `, score ${fmt0(sc28)}` : ''}${isFinite(dr) && isFinite(r28) ? ` · FC repos ${Math.abs(dr) < 1 ? 'stable' : `${dr > 0 ? 'en hausse' : 'en baisse'} de ${fmt0(Math.abs(dr))} bpm`}` : ''}.`,
+d: bad ? 'Ta récupération fatigue sur la durée : couche-toi plus tôt les veilles de séance clé et garde les footings vraiment lents.' : 'Ta récupération suit la charge : continue comme ça.' }); }
+const fNow = ff[ff.length - 1], f28 = ff[ff.length - 29];
+if (fNow && f28) { const g = fNow.ctl - f28.ctl;
+out.push({ k: 'Forme', w: Math.abs(g) / 20, t: `Forme ${fmt0(fNow.ctl)}, ${g >= 0 ? '+' : '−'}${fmt0(Math.abs(g))} en 4 semaines.`, d: g > 1 ? 'Ton corps encaisse plus de travail qu\'il y a un mois : la prépa construit.' : g < -3 ? 'Ta forme baisse : normal en semaine allégée ou en affûtage, sinon signe que le volume a chuté.' : 'Forme stable.' }); }
+return out.sort((a, b) => b.w - a.w).slice(0, 3); })();
+const reminder = (() => { const s2 = nextSession; if (!s2 || s2.date > addDays(today, 1)) return '';
+const act = flatSteps(s2.steps).find((x) => x.intensity === 'active' && x.target);
+return `<div class="coach-rem"><b>${+s2.date === +today ? 'Aujourd\'hui' : 'Demain'} · ${esc(s2.title)}</b><span>${act ? `Vise ${tgtTxt(act).replace(/<[^>]+>/g, '')} sur les blocs.` : esc(s2.desc)}</span>${fuelHtml(s2)}<button type="button" class="btn sm" data-goto="${allSessions.indexOf(s2)}">Voir la séance</button></div>`; })();
+const tipBlock = (title, list, color) => `<div class="tip-blk"><div class="tip-k"><span class="sw" style="background:${color}"></span>${title}</div>${list.map((x) => `<div class="tip"><div class="tip-t"><span class="tip-tag">${esc(x.k)}</span>${esc(x.t)}</div><div class="tip-d">${esc(x.d)}</div></div>`).join('')}</div>`;
 const tKey = dayKey(today);
 const hrvT = hrvMap.get(tKey), sleepSec = sleepMap.get(tKey)?.sleepTimeSeconds, sleepSc = sleepScore(sleepMap.get(tKey)), rhrT = rhrOf(today);
 const rhrBase28 = avg(Array.from({ length: 28 }, (_, i) => rhrOf(addDays(today, -1 - i))).filter(Boolean));
@@ -632,17 +717,12 @@ ${calMonths.map((c, i) => `<div class="cal-month" data-mi="${i}" ${i === calCur 
 <p class="note">Touche une séance pour voir son détail.</p>
 </section>`;
 // ===== 6. Construction de la page =====
-// ===== Forme / fatigue / fraîcheur : suivi seulement, ne modifie jamais le plan =====
-const ff = (() => { if (!activities.length) return [];
-let d = startOfDay(activities.reduce((m, a) => (a._date < m ? a._date : m), today)), ctl = 0, atl = 0; const out = [];
-for (; d <= today; d = addDays(d, 1)) { const l = loadOn.get(dayKey(d)) || 0; ctl += (l - ctl) / 42; atl += (l - atl) / 7; out.push({ d, ctl, atl, tsb: ctl - atl }); }
-return out; })();
 const ffShow = ff.slice(-Math.min(ff.length, Math.max(56, Math.round((today - planStartMon) / DAY) + 28)));
 const ffLast = ff[ff.length - 1], ffPrev = ff[ff.length - 8];
 const ffState = !ffLast ? null : ffLast.tsb > 5 ? ['Frais', 'Tu es reposé : bon moment pour une séance clé ou une course.']
 : ffLast.tsb >= -10 ? ['Équilibré', 'La charge et la récupération s\'équilibrent.']
 : ffLast.tsb >= -30 ? ['En charge', 'Fatigue normale en pleine prépa : c\'est elle qui fait progresser.'] : ['Très chargé', 'Grosse fatigue accumulée : soigne le sommeil et garde les footings vraiment faciles.'];
-const ffHtml = ff.length < 21 ? '' : `<div class="card span-12" id="ffCard"><h2>Forme, fatigue et fraîcheur</h2><div class="sub">Calculé sur ta charge Garmin, tous sports · suivi seulement, le plan ne change pas avec</div>
+const ffHtml = ff.length < 21 ? '' : `<div class="card span-12" id="ffCard"><h2>Forme, fatigue et fraîcheur</h2><div class="sub">Calculé sur ta charge Garmin, tous sports · compte pour 15 % dans l'auto-régulation</div>
 <div class="ff-kpis tnum"><span><small>Forme (42 j)</small><b>${fmt0(ffLast.ctl)}</b>${ffPrev ? `<i>${ffLast.ctl - ffPrev.ctl >= 0 ? '+' : '−'}${fmt0(Math.abs(ffLast.ctl - ffPrev.ctl))} en 7 j</i>` : ''}</span><span><small>Fatigue (7 j)</small><b>${fmt0(ffLast.atl)}</b></span><span><small>Fraîcheur</small><b>${ffLast.tsb >= 0 ? '+' : '−'}${fmt0(Math.abs(ffLast.tsb))}</b><i>${ffState[0]}</i></span></div>
 <p class="note">${ffState[1]} Le jour de la course, vise une fraîcheur positive (entre +5 et +25) : c'est le rôle de l'affûtage.</p>
 <div class="chart"><canvas id="cFf"></canvas></div>
@@ -698,9 +778,11 @@ ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv$
 </section>
 <section class="card" data-tab="today">
 <div class="coach-head"><h2>Les conseils du coach</h2><span>${factsTxt}</span></div>
+${reminder}
 <div class="coach-tips">
-<div class="tip"><div class="tip-k"><span class="sw" style="background:${V('t-easy')}"></span>Récupération</div><div class="tip-t">${esc(recoveryTip.t)}</div><div class="tip-d">${esc(recoveryTip.d)}</div></div>
-<div class="tip"><div class="tip-k"><span class="sw" style="background:${V('accent')}"></span>Entraînement</div><div class="tip-t">${esc(trainingTip.t)}</div><div class="tip-d">${esc(trainingTip.d)}</div></div>
+${tipBlock('Semaine passée', pastTips.slice(0, 3), V('t-easy'))}
+${tipBlock('Cette semaine', weekTips, V('accent'))}
+${trendTips.length ? tipBlock('Tendance 4 semaines', trendTips, V('series-7')) : ''}
 </div>
 </section>
 <h1 class="tab-title" data-tab="plan">Plan d'entraînement</h1>
@@ -713,6 +795,7 @@ ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv$
 <div class="progress"><span style="width:${Math.min(100, (curWeek.doneKm / Math.max(1, curWeek.targetKm)) * 100)}%"></span></div>
 ${regulHtml}
 <div class="sessions">${curWeek.sessions.map((s) => sessionCard(s)).join('')}</div>
+${curWeek.removed && curWeek.removed.length ? `<div class="mv-removed">${curWeek.removed.map((s) => `<span>Supprimée : <b>${esc(s.title)}</b> (${s.origDate.toLocaleDateString('fr-FR', { weekday: 'long' })})</span><button type="button" class="btn sm" data-mvundo="${esc(moveKey(s))}">Rétablir</button>`).join('')}</div>` : ''}
 <div class="pace-strip tnum"><span class="ps-k">Tes allures</span>${[
 ['Footing', hrEasy ? `${hrEasy.lo}-${hrEasy.hi} bpm` : `${fmtPace(R2.easy.fast)}-${fmtPace(R2.easy.slow)}`],
 ['Endurance active', `${fmtPace(R2.long.fast)}-${fmtPace(R2.long.slow)}`], ['Soutenue', `${fmtPace(R2.sout.fast)}-${fmtPace(R2.sout.slow)}`],
@@ -1023,12 +1106,21 @@ glide(el, 'center');
 el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1300);
 return;
 }
-const mv = t.closest('[data-mv], [data-mvreset]');
-if (mv) {
-const s = allSessions[Number(mv.dataset.mv ?? mv.dataset.mvreset)]; if (!s) return;
-if (mv.dataset.mvreset != null) delete moves[moveKey(s)]; else moves[moveKey(s)] = Number(mv.dataset.to);
-try { localStorage.setItem('moves', JSON.stringify(moves)); } catch (err) { /* private mode */ }
-location.hash = '#plan'; location.reload(); return;
+const mv = t.closest('[data-mv], [data-mvreset], [data-mvnext], [data-mvdel], [data-mvundo], [data-mvact]');
+if (mv) { const ds = mv.dataset;
+if (ds.mvundo) { delete moves[ds.mvundo]; saveMoves(); return; }
+if (ds.mvact) { const p = pendingMove; if (!p) return; const box = mv.closest('.mv-out');
+if (ds.mvact === 'cancel') { box.hidden = true; pendingMove = null; return; }
+const pb = p.r.noRoom[0] || p.r.tooClose[0];
+if (ds.mvact === 'ok' || ds.mvact === 'keep') { p.commit(); saveMoves(); return; }
+if (ds.mvact === 'remove') { p.commit(pb.item); moves[pb.item.id] = 'x'; saveMoves(); return; }
+if (ds.mvact === 'next') { p.commit(pb.item); if (!pushNext(pb.item.s)) { alert('Pas de place la semaine prochaine.'); return; } saveMoves(); return; }
+return; }
+const s = allSessions[Number(ds.mv ?? ds.mvreset ?? ds.mvnext ?? ds.mvdel)]; if (!s) return;
+if (ds.mvreset != null) { delete moves[moveKey(s)]; saveMoves(); return; }
+if (ds.mvdel != null) { if (!confirm(`Supprimer « ${s.title} » de ton plan ? Tu pourras la rétablir.`)) return; moves[moveKey(s)] = 'x'; saveMoves(); return; }
+if (ds.mvnext != null) { if (!pushNext(s)) { alert('Pas de place la semaine prochaine.'); return; } saveMoves(); return; }
+proposeMove(s, Number(ds.to), mv.closest('.move').querySelector('.mv-out')); return;
 }
 if (t.closest('#icsBtn')) { downloadIcs(); return; }
 const rd = t.closest('[data-recdel]');
