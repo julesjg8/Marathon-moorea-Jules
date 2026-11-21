@@ -162,7 +162,18 @@ for (let w = 0; w < curWeekIdx; w++) if (weekRuns(addDays(planStartMon, w * 7)).
 const SC = window.SessionScore;
 const levels = [];
 let feel = {}; try { feel = JSON.parse(localStorage.getItem('feel') || '{}') || {}; } catch (e) { /* nothing saved */ }
-const feelKey = (s) => `${dayKey(s.date)}|${s.type}`;
+const feelKey = (s) => `${dayKey(s.origDate || s.date)}|${s.type}`;
+// Séances déplacées par l'utilisateur : { "jourPrévu|type": index du jour dans la semaine (0 = lundi) }.
+let moves = {}; try { moves = JSON.parse(localStorage.getItem('moves') || '{}') || {}; } catch (e) { /* nothing saved */ }
+const moveKey = (s) => `${dayKey(s.origDate || s.date)}|${s.type}`;
+const applyMoves = (w) => {
+w.sessions.forEach((s) => { s.origDate = s.date; });
+w.sessions.forEach((s) => { const to = moves[moveKey(s)]; if (to == null || s.type === 'race') return;
+const d = addDays(w.monday, to); if (dayKey(d) === dayKey(s.date)) return;
+const other = w.sessions.find((x) => x !== s && x.type !== 'race' && dayKey(x.date) === dayKey(d));
+if (other) other.date = s.date;
+s.date = d; s.moved = true; });
+w.sessions.sort((a, b) => a.date - b.date); };
 const feelCount = (list) => { const f = { facile: 0, bien: 0, dur: 0, tresdur: 0, n: 0 };
 list.forEach((s) => { const v = feel[feelKey(s)]; if (v && f[v] !== undefined) { f[v]++; f.n++; } }); return f; };
 const adjustOf = (w) => {
@@ -189,6 +200,7 @@ paces, easyPace, longPace, hrEasy, phaseOf: phaseAt, holdWeeks, adjust: SC ? adj
 });
 curRanges = plan.ranges;
 plan.weeks.forEach((w) => {
+applyMoves(w);
 const all = weekRuns(w.monday), over = addDays(w.monday, 7) <= today;
 const pick = all.length ? pairUp(w.sessions, all) : [];
 w.sessions.forEach((s, i) => {
@@ -226,6 +238,21 @@ const typeLabel = { easy: 'Footing', quality: 'Qualité', long: 'Sortie longue',
 const fitName = (s) => `${dayKey(s.date)}_${noAccent(s.title).replace(/[^A-Za-z0-9]+/g, '-').replace(/-+$/, '')}.fit`;
 const wktName = (s) => `${fmtDM(s.date).replace('/', '-')} ${noAccent(s.title)}`;
 const canDownload = !!window.FitWorkout;
+// Export calendrier (.ics) : une journée par séance à venir. UID stable = même séance, même identifiant.
+const icsEsc = (x) => String(x).replace(/\\/g, '\\\\').replace(/([,;])/g, '\\$1').replace(/\n/g, '\\n');
+const icsFold = (l) => { const out = []; while (l.length > 70) { out.push(l.slice(0, 70)); l = ' ' + l.slice(70); } out.push(l); return out.join('\r\n'); };
+const icsDay = (d) => dayKey(d).replace(/-/g, '');
+const plainSteps = (steps) => flatSteps(steps).length ? steps.map((x) => (x.repeat ? `${x.repeat} x [ ${x.steps.map((y) => `${garminType[y.intensity]} ${durTxt(y.dur)}, ${tgtTxt(y).replace(/<[^>]+>/g, '')}`).join(' / ')} ]` : `${garminType[x.intensity]} ${durTxt(x.dur)}, ${tgtTxt(x).replace(/<[^>]+>/g, '')}`)).join('\n') : '';
+const downloadIcs = () => {
+const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+const ev = allSessions.filter((s) => s.date >= today && !s.run).map((s) => [
+'BEGIN:VEVENT', `UID:${icsDay(s.origDate || s.date)}-${s.type}@prepa-moorea`, `DTSTAMP:${now}`, `SEQUENCE:${Math.floor(Date.now() / 1000)}`,
+`DTSTART;VALUE=DATE:${icsDay(s.date)}`, `DTEND;VALUE=DATE:${icsDay(addDays(s.date, 1))}`,
+`SUMMARY:${icsEsc(`${s.type === 'race' ? '🏁' : '🏃'} ${s.title}`)}`,
+`DESCRIPTION:${icsEsc(`${s.desc}${s.steps.length ? '\n\n' + plainSteps(s.steps) : ''}`)}`, 'TRANSP:TRANSPARENT', 'END:VEVENT'].map(icsFold).join('\r\n'));
+const txt = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Prepa Moorea//FR', 'METHOD:PUBLISH', 'X-WR-CALNAME:Prépa', ...ev, 'END:VCALENDAR'].join('\r\n') + '\r\n';
+const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([txt], { type: 'text/calendar;charset=utf-8' }));
+a.download = 'prepa-moorea.ics'; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500); };
 const garminType = { warmup: 'Échauffement', active: 'Course', rest: 'Récupération', cooldown: 'Retour au calme' };
 const stepLabel = { Echauffement: '', Recup: '', 'Recup footing': 'en footing', 'Retour au calme': '', Acceleration: 'accélération', Footing: 'footing' };
 const stepLevel = (s) => { if (s.intensity === 'rest' && !s.target) return 0; const r = s.est / fitMP;
@@ -255,6 +282,15 @@ const FEELS = [['facile', 'Facile'], ['bien', 'Bien'], ['dur', 'Dur'], ['tresdur
 const feelHtml = (s, i) => { if (s.type === 'race' || s.missed) return '';
 const cur = feel[feelKey(s)], future = s.date > today;
 return `<div class="feel" role="group" aria-label="Ressenti de la séance"><span class="feel-k">${future ? 'À noter après la séance' : 'Ton ressenti'}</span><span class="feel-b">${FEELS.map(([v, l]) => `<button type="button" class="feel-o f-${v}${cur === v ? ' on' : ''}" data-feel="${i}" data-v="${v}" aria-pressed="${cur === v}"${future ? ' disabled' : ''}>${l}</button>`).join('')}</span></div>`; };
+const DOW = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+const moveHtml = (s, i) => { if (s.run || s.missed || s.type === 'race') return '';
+const w = plan.weeks.find((x) => x.sessions.includes(s)); if (!w) return '';
+const cur = Math.round((startOfDay(s.date) - w.monday) / DAY);
+const chips = DOW.map((l, k) => { const d = addDays(w.monday, k), past = d < today;
+const busy = w.sessions.some((x) => x !== s && dayKey(x.date) === dayKey(d));
+return `<button type="button" class="mv-d${k === cur ? ' on' : ''}" data-mv="${i}" data-to="${k}"${past || k === cur ? ' disabled' : ''} title="${busy ? 'échange avec la séance de ce jour' : ''}">${l}<small>${d.getDate()}</small>${busy ? '<i>⇄</i>' : ''}</button>`; }).join('');
+return `<details class="move"><summary>${s.moved ? `Déplacée (prévue ${s.origDate.toLocaleDateString('fr-FR', { weekday: 'long' })}) · changer` : 'Déplacer cette séance'}</summary>
+<div class="mv-days">${chips}</div>${s.moved ? `<button type="button" class="btn mv-reset" data-mvreset="${i}">Remettre au jour prévu</button>` : ''}<p class="note">⇄ = échange avec la séance déjà prévue ce jour-là.</p></details>`; };
 const sessionCard = (s, forceOpen) => {
 const i = allSessions.indexOf(s);
 const isNext = s === nextSession;
@@ -269,7 +305,7 @@ const scoreBadge = sc ? `<span class="s-score">${ring(sc.total)}<span><b>${sc.la
 const scoreDetail = sc ? `<div class="score-detail"><div class="score-title">Analyse de la séance · <b>${sc.total}/100</b>${sc.approx ? ' <span class="note">(estimation, détail des tours indisponible)</span>' : ''}</div>
 ${sc.parts.map((p) => `<div class="score-row"><span class="score-name">${p.name}</span><span class="score-bar"><i class="${scClass}" style="width:${Math.round((p.pts / p.max) * 100)}%"></i></span><span class="score-pts tnum">${p.pts}/${p.max}</span><span class="score-txt">${esc(p.txt)}</span></div>`).join('')}</div>` : '';
 const hasSteps = s.steps.length > 0;
-const open = forceOpen === true || isNext;
+const open = forceOpen === true;
 return `<div class="session ${isNext ? 'next' : ''}" data-s="${i}" style="border-top-color:${typeColor[s.type]}">
 <button type="button" class="s-head" ${hasSteps ? `aria-expanded="${open}"` : 'disabled'}>
 <span class="s-day">${esc(s.date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'short' }))}</span>
@@ -283,6 +319,7 @@ ${sc ? `<span class="s-sum">${esc(sc.summary)}</span>` : ''}
 ${hasSteps ? `<span class="s-more">${sc ? 'Analyse et étapes de la séance' : 'Étapes de la séance'}</span>` : ''}
 </button>
 ${feelHtml(s, i)}
+${moveHtml(s, i)}
 ${hasSteps ? `<div class="s-steps" ${open ? '' : 'hidden'}>${scoreDetail}<ol>${stepsHtml(s.steps)}</ol>${r ? '' : fuelHtml(s)}
 ${canDownload ? `<button type="button" class="btn fit-btn ${isNext ? 'primary' : ''}" data-sid="${i}">⌚ Fichier pour la montre (.fit)</button>` : ''}
 </div>` : ''}
@@ -595,6 +632,42 @@ ${calMonths.map((c, i) => `<div class="cal-month" data-mi="${i}" ${i === calCur 
 <p class="note">Touche une séance pour voir son détail.</p>
 </section>`;
 // ===== 6. Construction de la page =====
+// ===== Forme / fatigue / fraîcheur : suivi seulement, ne modifie jamais le plan =====
+const ff = (() => { if (!activities.length) return [];
+let d = startOfDay(activities.reduce((m, a) => (a._date < m ? a._date : m), today)), ctl = 0, atl = 0; const out = [];
+for (; d <= today; d = addDays(d, 1)) { const l = loadOn.get(dayKey(d)) || 0; ctl += (l - ctl) / 42; atl += (l - atl) / 7; out.push({ d, ctl, atl, tsb: ctl - atl }); }
+return out; })();
+const ffShow = ff.slice(-Math.min(ff.length, Math.max(56, Math.round((today - planStartMon) / DAY) + 28)));
+const ffLast = ff[ff.length - 1], ffPrev = ff[ff.length - 8];
+const ffState = !ffLast ? null : ffLast.tsb > 5 ? ['Frais', 'Tu es reposé : bon moment pour une séance clé ou une course.']
+: ffLast.tsb >= -10 ? ['Équilibré', 'La charge et la récupération s\'équilibrent.']
+: ffLast.tsb >= -30 ? ['En charge', 'Fatigue normale en pleine prépa : c\'est elle qui fait progresser.'] : ['Très chargé', 'Grosse fatigue accumulée : soigne le sommeil et garde les footings vraiment faciles.'];
+const ffHtml = ff.length < 21 ? '' : `<div class="card span-12" id="ffCard"><h2>Forme, fatigue et fraîcheur</h2><div class="sub">Calculé sur ta charge Garmin, tous sports · suivi seulement, le plan ne change pas avec</div>
+<div class="ff-kpis tnum"><span><small>Forme (42 j)</small><b>${fmt0(ffLast.ctl)}</b>${ffPrev ? `<i>${ffLast.ctl - ffPrev.ctl >= 0 ? '+' : '−'}${fmt0(Math.abs(ffLast.ctl - ffPrev.ctl))} en 7 j</i>` : ''}</span><span><small>Fatigue (7 j)</small><b>${fmt0(ffLast.atl)}</b></span><span><small>Fraîcheur</small><b>${ffLast.tsb >= 0 ? '+' : '−'}${fmt0(Math.abs(ffLast.tsb))}</b><i>${ffState[0]}</i></span></div>
+<p class="note">${ffState[1]} Le jour de la course, vise une fraîcheur positive (entre +5 et +25) : c'est le rôle de l'affûtage.</p>
+<div class="chart"><canvas id="cFf"></canvas></div>
+<div class="legend"><span><span class="sw" style="background:${V('series-1')}"></span>Forme</span><span><span class="sw" style="background:${V('serious')}"></span>Fatigue</span><span><span class="sw" style="background:${V('series-3')}"></span>Fraîcheur</span></div></div>`;
+// ===== Records : automatiques (Garmin) ou notés à la main =====
+const REC = [['1k', '1 km', 1000], ['5k', '5 km', 5000], ['10k', '10 km', 10000], ['half', 'Semi', 21097.5], ['mara', 'Marathon', 42195]];
+let recUser = {}; try { recUser = JSON.parse(localStorage.getItem('records') || '{}') || {}; } catch (e) { /* nothing saved */ }
+const splitKey = { '1k': ['fastestSplit_1000'], '5k': ['fastestSplit_5000'], '10k': ['fastestSplit_10000'], half: ['fastestSplit_21097', 'fastestSplit_21098'], mara: ['fastestSplit_42195'] };
+const recAuto = (k, m) => { let best = null;
+runs.forEach((r) => { let t = null;
+splitKey[k].forEach((f) => { if (r[f] > 0) t = r[f]; });
+if (t == null && r.distance >= m * 0.99 && r.distance <= m * 1.06) t = r.duration * (m / r.distance);
+if (t != null && (!best || t < best.t)) best = { t, d: r._date }; });
+return best; };
+const recRows = REC.map(([k, l, m]) => { const a = recAuto(k, m), u = recUser[k] ? { t: parseTime(recUser[k].t), d: new Date(recUser[k].d + 'T00:00:00'), own: true } : null;
+const b = a && u ? (u.t <= a.t ? u : a) : a || u; return b ? { k, l, m, ...b } : null; }).filter(Boolean);
+const wkAll = new Map(); runs.forEach((r) => { const k = dayKey(monday(r._date)); wkAll.set(k, (wkAll.get(k) || 0) + km(r.distance)); });
+const recLong = runs.reduce((b, r) => (!b || r.distance > b.distance ? r : b), null);
+const bigWeek = [...wkAll.entries()].reduce((b, e) => (!b || e[1] > b[1] ? e : b), null);
+const recHtml = `<details class="card records" data-tab="goal"><summary><h2>Mes records</h2><span class="sub">${recRows.length ? `${recRows.length} distance${recRows.length > 1 ? 's' : ''}` : 'aucun pour l\'instant'} · toucher pour voir</span></summary>
+<div class="rec-list">${recRows.map((r) => `<div class="rec"><span class="rec-k">${r.l}</span><b class="tnum">${fmtDur(r.t)}</b><span class="tnum note">${fmtPace(r.t / (r.m / 1000))}/km · ${fmtDate(r.d)}${r.own ? ' · noté à la main' : ''}</span>${r.own ? `<button type="button" class="rec-x" data-recdel="${r.k}" aria-label="Supprimer le record ${r.l}">×</button>` : ''}</div>`).join('')}
+${recLong ? `<div class="rec"><span class="rec-k">Plus longue sortie</span><b class="tnum">${fmt1(km(recLong.distance))} km</b><span class="note">${fmtDate(recLong._date)}</span></div>` : ''}
+${bigWeek ? `<div class="rec"><span class="rec-k">Plus grosse semaine</span><b class="tnum">${fmt0(bigWeek[1])} km</b><span class="note">semaine du ${fmtDate(new Date(bigWeek[0] + 'T00:00:00'))}</span></div>` : ''}</div>
+<p class="note">Automatique : meilleure sortie de la bonne distance (ou meilleur passage si Garmin le donne). Un record fait ailleurs, en course officielle ? Note-le :</p>
+<form class="gp-add" id="recForm"><select name="k" aria-label="Distance">${REC.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select><input type="text" name="t" placeholder="0:45:30" autocomplete="off" aria-label="Temps (h:mm:ss)" required><input type="date" name="d" value="${dayKey(today)}" aria-label="Date"><button type="submit" class="btn">Noter</button><span class="note rec-msg"></span></form></details>`;
 app.innerHTML = `
 <header class="topbar"><div class="top-in">
 <a class="brand" href="#today" data-nav="today"><span class="logo">42</span><span class="brand-t">Prépa Marathon</span><span class="dday tnum">J-${daysLeft}</span></a>
@@ -639,13 +712,21 @@ ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv$
 </div>
 <div class="progress"><span style="width:${Math.min(100, (curWeek.doneKm / Math.max(1, curWeek.targetKm)) * 100)}%"></span></div>
 ${regulHtml}
-<div class="sessions">${curWeek.sessions.map((s) => sessionCard(s, true)).join('')}</div>
+<div class="sessions">${curWeek.sessions.map((s) => sessionCard(s)).join('')}</div>
 <div class="pace-strip tnum"><span class="ps-k">Tes allures</span>${[
 ['Footing', hrEasy ? `${hrEasy.lo}-${hrEasy.hi} bpm` : `${fmtPace(R2.easy.fast)}-${fmtPace(R2.easy.slow)}`],
 ['Endurance active', `${fmtPace(R2.long.fast)}-${fmtPace(R2.long.slow)}`], ['Soutenue', `${fmtPace(R2.sout.fast)}-${fmtPace(R2.sout.slow)}`],
 ['Marathon', `${fmtPace(R2.mp.fast)}-${fmtPace(R2.mp.slow)}`], ['Semi', `${fmtPace(R2.half.fast)}-${fmtPace(R2.half.slow)}`],
 ['Seuil', `${fmtPace(paces.threshold.fast)}-${fmtPace(paces.threshold.slow)}`], ['Fractionné', `${fmtPace(paces.interval.fast)}-${fmtPace(paces.interval.slow)}`],
 ['VMA', `${fmtPace(paces.vma.fast)}-${fmtPace(paces.vma.slow)}`]].map(([k, v]) => `<span class="ps"><span>${k}</span><b>${v}</b></span>`).join('')}</div>
+<details class="howto cal-exp"><summary>Mettre les séances dans le calendrier de l'iPhone</summary>
+<ol>
+<li>Appuie sur <b>Télécharger le calendrier</b>, puis sur <b>Tout ajouter</b>.</li>
+<li>Choisis un calendrier à part, nommé <b>Prépa</b> (Calendrier › Calendriers › Ajouter un calendrier, une seule fois).</li>
+<li>Tu as déplacé une séance ? Dans Calendrier › Calendriers, supprime le calendrier <b>Prépa</b> (toutes ses séances partent d'un coup), recrée-le, puis télécharge à nouveau.</li>
+</ol>
+<button type="button" class="btn primary" id="icsBtn">📅 Télécharger le calendrier</button>
+</details>
 <details class="howto" ${canDownload ? '' : 'hidden'}><summary>Comment mettre une séance sur ma montre ?</summary>
 <ol>
 <li>Sur un ordinateur, ouvre la séance et clique sur <b>Fichier pour la montre (.fit)</b> : le fichier se télécharge.</li>
@@ -729,12 +810,15 @@ ${thr ? `<div class="goal-row"><span class="k">Potentiel d'après ton seuil<br><
 ${hasPot ? `<div class="card span-6"><h2>Ton potentiel marathon</h2><div class="sub">D'après ta meilleure séance au seuil des 12 semaines précédentes · plus haut = plus rapide</div><div class="chart sm"><canvas id="cPot"></canvas></div>
 <div class="legend"><span><span class="sw" style="background:${V('series-1')}"></span>Potentiel</span><span><span class="ln"></span>Objectif (${goalTxt})</span></div></div>` : ''}
 <div class="card ${hasPot ? 'span-6' : 'span-12'}"><h2>Charge d'entraînement par semaine</h2><div class="sub">Tous sports confondus · charge Garmin</div><div class="chart sm"><canvas id="cLoad"></canvas></div></div>
+${ffHtml}
 </section>
 <section class="card" id="gpCard" data-tab="goal"><h2>Prédiction Garmin au fil du temps</h2><div class="sub">Temps marathon prédit par ta montre · plus haut = plus rapide</div>
 ${gpHist.length >= 2 ? `<div class="chart sm"><canvas id="cGp"></canvas></div>
 <div class="legend"><span><span class="sw" style="background:${V('series-7')}"></span>Prédiction Garmin</span><span><span class="ln"></span>Objectif (${goalTxt})</span></div>
 <p class="note">Depuis le ${fmtDate(gpHist[0].d)} : ${(() => { const g = gpHist[0].t - gpLast.t; return Math.abs(g) < 30 ? 'stable' : `${g > 0 ? 'gagné' : 'perdu'} ${fmtDur(Math.abs(g))}`; })()} · dernière : ${fmtDur(gpLast.t)}, ${deltaHtml(gpLast.t - targetSec)}</p>`
 : `<p class="note">${gpHist.length ? `Une seule valeur pour l'instant (${fmtDur(gpHist[0].t)} le ${fmtDate(gpHist[0].d)}). La courbe apparaît dès la 2e.` : 'Aucune prédiction saisie.'} Ajoute ta prédiction dans la case « Prédiction du jour » à chaque relevé.</p>`}</section>
+<section class="card" id="course" data-tab="goal"></section>
+${recHtml}
 <h1 class="tab-title" data-tab="recup">Récupération</h1>
 <details class="card recovery" id="recovery" data-tab="recup" open>
 <summary><b>Récupération</b><span class="tnum">VFC ${latestHrv?.lastNightAvg ?? '–'} ms · FC repos ${isFinite(rhr7) ? fmt0(rhr7) : '–'} bpm · Sommeil ${isFinite(sleep7) ? fmt1(sleep7) : '–'} h${isFinite(score7) ? ` (score ${fmt0(score7)})` : ''}</span></summary>
@@ -804,6 +888,7 @@ const ph = PHASES.slice(0, 3).filter(([k]) => isFinite(s[k]) && s[k] > 0).map(([
 return [` ${hm(c.raw)}${sc ? ` · score ${sc}` : ''}`, ...(ph ? [` ${ph}`] : [])]; } } } } } });
 };
 const recoveryEl = document.getElementById('recovery');
+if (window.Course) window.Course.mount(document.getElementById('course'), { key: 'course', raceKm: R.distanceKm, raceName: R.name });
 const show = (key) => { if (!C || drawn.has(key)) return; drawn.add(key); if (key === 'recovery') drawRecovery(); else drawCmp(key); };
 const paceRuns = inLast(prepRuns, 84).filter((r) => !(r.elevationGain > 25 * km(r.distance)));
 // ===== 7. Graphiques et interactions (onglets, thème, boutons) =====
@@ -858,6 +943,13 @@ mk('cLoad', { type: 'bar',
 data: { labels: weekLabels.map((l) => 'Sem. ' + l), datasets: [{ label: 'Charge', data: wLoad.map(Math.round), ...bar(C.s3) }] },
 options: { interaction: hover, scales: { x: weekX(), y: scaleY({ beginAtZero: true }) },
 plugins: { tooltip: { callbacks: { label: (c) => ` Charge ${fmt0(c.raw)}` } } } } });
+if (ffHtml) mk('cFf', { type: 'line',
+data: { labels: ffShow.map((x) => fmtDM(x.d)), datasets: [
+{ label: 'Forme', data: ffShow.map((x) => Math.round(x.ctl)), ...thin(C.s1) },
+{ label: 'Fatigue', data: ffShow.map((x) => Math.round(x.atl)), ...thin(C.serious) },
+{ label: 'Fraîcheur', data: ffShow.map((x) => Math.round(x.tsb)), ...thin(C.s3), borderDash: [5, 3] }] },
+options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ grid: { color: (c) => (c.tick && c.tick.value === 0 ? C.axis : C.grid) } }) },
+plugins: { tooltip: { callbacks: { title: (it) => fmtDate(ffShow[it[0].dataIndex].d), label: (c) => ` ${c.dataset.label} ${c.raw > 0 && c.datasetIndex === 2 ? '+' : ''}${c.raw}` } } } } });
 show(activeCmp);
 if (recoveryEl.open) show('recovery');
 };
@@ -893,6 +985,12 @@ drawCharts(false);
 };
 const f0 = (x) => { x = x.trim(); const dg = x.replace(/\D/g, ''); return /^\d+$/.test(x) && dg.length >= 3 && dg.length <= 6 ? dg.padEnd(dg.length <= 3 ? 3 : dg.length <= 5 ? 5 : 6, '0').replace(/^(\d)(\d\d)(\d\d)?$/, (m0, h, mm, ss) => `${h}:${mm}:${ss || '00'}`) : x; };
 app.addEventListener('submit', (e) => {
+if (e.target.id === 'recForm') { e.preventDefault(); const f = e.target, m = f.querySelector('.rec-msg');
+const raw = f.t.value.trim().replace(/[hH'.,\s]+/g, ':').replace(/:+$/, ''), t = raw.split(':').length === 2 ? '0:' + raw : raw;
+if (!/^\d{1,2}:\d{2}:\d{2}$/.test(t) || !/^\d{4}-\d{2}-\d{2}$/.test(f.d.value)) { m.textContent = 'Format attendu : 0:45:30 (h:mm:ss) ou 45:30.'; m.classList.add('err'); return; }
+recUser[f.k.value] = { t, d: f.d.value };
+try { localStorage.setItem('records', JSON.stringify(recUser)); } catch (err) { m.textContent = 'Impossible d\'enregistrer (navigation privée ?).'; m.classList.add('err'); return; }
+location.hash = '#goal'; location.reload(); return; }
 if (e.target.id !== 'gpForm') return;
 e.preventDefault();
 let v = f0(e.target.t.value);
@@ -925,6 +1023,16 @@ glide(el, 'center');
 el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1300);
 return;
 }
+const mv = t.closest('[data-mv], [data-mvreset]');
+if (mv) {
+const s = allSessions[Number(mv.dataset.mv ?? mv.dataset.mvreset)]; if (!s) return;
+if (mv.dataset.mvreset != null) delete moves[moveKey(s)]; else moves[moveKey(s)] = Number(mv.dataset.to);
+try { localStorage.setItem('moves', JSON.stringify(moves)); } catch (err) { /* private mode */ }
+location.hash = '#plan'; location.reload(); return;
+}
+if (t.closest('#icsBtn')) { downloadIcs(); return; }
+const rd = t.closest('[data-recdel]');
+if (rd) { delete recUser[rd.dataset.recdel]; try { localStorage.setItem('records', JSON.stringify(recUser)); } catch (err) { /* private mode */ } location.hash = '#goal'; location.reload(); return; }
 const fo = t.closest('.feel-o');
 if (fo) {
 const s = allSessions[Number(fo.dataset.feel)]; if (!s) return;

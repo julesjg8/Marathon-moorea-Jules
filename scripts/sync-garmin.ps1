@@ -95,7 +95,7 @@ while ($true) {
   $page = @($page)
   foreach ($a in $page) {
     if (-not $a) { continue }
-    [void]$acts.Add([ordered]@{
+    $row = [ordered]@{
       activityId           = $a.activityId
       activityName         = $a.activityName
       activityType         = @{ typeKey = $a.activityType.typeKey }
@@ -111,7 +111,12 @@ while ($true) {
       hrTimeInZone_3       = $a.hrTimeInZone_3
       hrTimeInZone_4       = $a.hrTimeInZone_4
       hrTimeInZone_5       = $a.hrTimeInZone_5
-    })
+    }
+    # Fastest splits (seconds) for the records card, only when Garmin gives them.
+    foreach ($k in 'fastestSplit_1000', 'fastestSplit_5000', 'fastestSplit_10000', 'fastestSplit_21097', 'fastestSplit_21098', 'fastestSplit_42195') {
+      if ($a.$k) { $row[$k] = $a.$k }
+    }
+    [void]$acts.Add($row)
   }
   if ($page.Count -lt $limit -or $start -ge 2000) { break }
   $start += $limit
