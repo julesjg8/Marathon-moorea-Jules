@@ -285,6 +285,27 @@ foreach ($c in (Get-Chunks 'Sleep' { param($a, $b) "/sleep-service/sleep/dailySl
   }
 }
 
+# Sleep score: not in the daily summaries, so it is read night by night (last 14 nights).
+# A failure here is silent: the score is a bonus, never a reason to flag the sync as broken.
+$scoreByDay = @{}
+for ($i = 0; $i -lt 14; $i++) {
+  $d = $today.AddDays(-$i).ToString($fmt)
+  try {
+    $r = Invoke-WebRequest -UseBasicParsing -Uri ($base + "/sleep-service/sleep/dailySleepData?date=$d&nonSleepBufferMinutes=60") -Headers $headers -TimeoutSec 30
+    $j = [Text.Encoding]::UTF8.GetString($r.RawContentStream.ToArray()).Trim() | ConvertFrom-Json
+    $dto = $j.dailySleepDTO; if (-not $dto) { $dto = $j }
+    if ($i -eq 0) { Write-Host ('  sleep score keys: ' + (($j.PSObject.Properties.Name) -join ', ') + ' | dto: ' + (($dto.sleepScores.PSObject.Properties.Name) -join ', ')) }
+    $v = $dto.sleepScores.overall.value
+    if ($null -ne $v) { $scoreByDay[$d] = $v }
+  } catch {
+    $code = $null; if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+    if ($i -eq 0) { Write-Host "  sleep score: HTTP $code" }
+    if ($code -ge 400 -and $code -lt 500) { break }
+  }
+}
+foreach ($x in $sleep) { if ($null -eq $x.score -and $scoreByDay.ContainsKey([string]$x.calendarDate)) { $x.score = $scoreByDay[[string]$x.calendarDate] } }
+Write-Host "  sleep scores: $($scoreByDay.Count) night(s)"
+
 $hrv = New-Object System.Collections.ArrayList
 foreach ($c in (Get-Chunks 'HRV' { param($a, $b) "/hrv-service/hrv/daily/$a/$b" })) {
   if (-not $c -or -not $c.hrvSummaries) { continue }
@@ -313,7 +334,11 @@ function Merge-Days($new, $oldList) {
 }
 if ($old) {
   if ($old.dailyChunks) { $daily = Merge-Days $daily $old.dailyChunks[0].data }
-  if ($old.sleepChunks) { $sleep = Merge-Days $sleep $old.sleepChunks[0] }
+  if ($old.sleepChunks) {
+    $oldScore = @{}; foreach ($x in @($old.sleepChunks[0])) { if ($x -and $null -ne $x.score) { $oldScore[[string](DateText $x.calendarDate $fmt)] = $x.score } }
+    foreach ($x in $sleep) { if ($null -eq $x.score -and $oldScore.ContainsKey([string]$x.calendarDate)) { $x.score = $oldScore[[string]$x.calendarDate] } }
+    $sleep = Merge-Days $sleep $old.sleepChunks[0]
+  }
   if ($old.hrvChunks) { $hrv = Merge-Days $hrv $old.hrvChunks[0].hrvSummaries }
 }
 
