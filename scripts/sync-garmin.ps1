@@ -283,7 +283,7 @@ foreach ($c in (Get-Chunks 'Sleep' { param($a, $b) "/sleep-service/sleep/dailySl
   }
 }
 
-# The sleep score is not available through the Personal API (no endpoint found): only the phases are kept.
+# Sleep score and phases come with the daily summaries above (sleepScores.overall.value).
 
 $hrv = New-Object System.Collections.ArrayList
 foreach ($c in (Get-Chunks 'HRV' { param($a, $b) "/hrv-service/hrv/daily/$a/$b" })) {
