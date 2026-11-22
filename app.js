@@ -332,7 +332,10 @@ return `<details class="move"><summary>${s.moved ? `Déplacée (prévue ${s.orig
 <div class="mv-acts">${hasNext ? `<button type="button" class="btn sm" data-mvnext="${i}">À la semaine prochaine</button>` : ''}<button type="button" class="btn sm" data-mvdel="${i}">Supprimer</button>${s.moved ? `<button type="button" class="btn sm" data-mvreset="${i}">Remettre au jour prévu</button>` : ''}</div>
 <div class="mv-out" hidden></div><p class="note">• = une séance est déjà prévue ce jour-là : les autres se décalent si besoin, pour garder 48 h entre deux séances dures.</p></details>`; };
 const canMoveCal = (x) => !!MK && !x.run && !x.missed && x.type !== 'race' && x.date >= startOfDay(today) && !!weekOfS(x);
-const saveMoves = () => { try { localStorage.setItem('moves', JSON.stringify(moves)); } catch (err) { /* private mode */ } location.hash = '#plan'; location.reload(); };
+// Après un déplacement, la page se recharge : on revient au même sous-onglet, au même mois et au même endroit.
+const saveMoves = () => { try { localStorage.setItem('moves', JSON.stringify(moves));
+const mo = app.querySelector('.cal-month:not([hidden])'); sessionStorage.setItem('reopen', JSON.stringify({ sub: subOf.plan, mi: mo ? mo.dataset.mi : null, y: window.scrollY })); } catch (err) { /* private mode */ }
+location.hash = '#plan'; location.reload(); };
 const toVal = (s, d) => Math.round((startOfDay(d) - monday(s.origDate)) / DAY);
 // Met une séance dans la semaine suivante, au même jour si possible. Retourne false s'il n'y a pas de place.
 const pushNext = (s) => { const w = weekOfS(s), w2 = plan.weeks[plan.weeks.indexOf(w) + 1]; if (!w2 || w2.weeksToRace === 0) return false;
@@ -1236,6 +1239,10 @@ if (head && !head.disabled) openSteps(head, head.getAttribute('aria-expanded') !
 recoveryEl.addEventListener('toggle', () => { if (recoveryEl.open) show('recovery'); });
 // Une page par onglet : seules les sections de l'onglet choisi sont affichées.
 setTab(NAV.some(([k]) => k === location.hash.slice(1)) ? location.hash.slice(1) : 'today', true);
+try { const ro = JSON.parse(sessionStorage.getItem('reopen') || 'null'); sessionStorage.removeItem('reopen');
+if (ro && location.hash === '#plan') { setTab('plan', true, ro.sub);
+if (ro.mi != null) app.querySelectorAll('.cal-month').forEach((m) => { m.hidden = m.dataset.mi !== ro.mi; });
+requestAnimationFrame(() => window.scrollTo(0, ro.y || 0)); } } catch (err) { /* private mode */ }
 window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (NAV.some(([k]) => k === h)) setTab(h); });
 drawCharts(true);
 })();
