@@ -144,7 +144,7 @@ const hasPhases = phase7.slice(0, 3).some((v) => isFinite(v) && v > 0);
 const sleepWeek = (mon) => Array.from({ length: 7 }, (_, i) => sleepMap.get(dayKey(addDays(mon, i)))).filter(Boolean);
 // Graphique sommeil : 3 semaines passées (moyennes) + les 7 nuits de cette semaine, par phase.
 const slCols = [...[3, 2, 1].map((n) => ({ lbl: `S-${n}`, nights: sleepWeek(addDays(thisMon, -7 * n)), wk: true })),
-...Array.from({ length: 7 }, (_, i) => { const d = addDays(thisMon, i), n = d <= today ? sleepMap.get(dayKey(d)) : null; return { lbl: `${d.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '').slice(0, 3)} ${d.getDate()}`, nights: n ? [n] : [], wk: false }; })];
+...Array.from({ length: 7 }, (_, i) => { const d = addDays(thisMon, i), n = d <= today ? sleepMap.get(dayKey(d)) : null; return { lbl: 'LMMJVSD'[i], full: d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }), nights: n ? [n] : [], wk: false }; })];
 const slVal = (nights, k) => { const v = nights.map((n) => (isFinite(n[k]) && n[k] > 0 ? n[k] / 3600 : null)).filter((x) => x != null); return v.length ? Math.round(avg(v) * 100) / 100 : null; };
 const slRest = slCols.map((c) => { const v = c.nights.filter((n) => !PHASES.slice(0, 3).some(([k]) => n[k] > 0) && n.sleepTimeSeconds).map((n) => n.sleepTimeSeconds / 3600); return v.length ? Math.round(avg(v) * 100) / 100 : null; });
 const slThis = slCols.slice(3).flatMap((c) => c.nights).filter((n) => n.sleepTimeSeconds);
@@ -817,55 +817,10 @@ ${curWeek.removed && curWeek.removed.length ? `<div class="mv-removed">${curWeek
 ['Marathon', `${fmtPace(R2.mp.fast)}-${fmtPace(R2.mp.slow)}`], ['Semi', `${fmtPace(R2.half.fast)}-${fmtPace(R2.half.slow)}`],
 ['Seuil', `${fmtPace(paces.threshold.fast)}-${fmtPace(paces.threshold.slow)}`], ['Fractionné', `${fmtPace(paces.interval.fast)}-${fmtPace(paces.interval.slow)}`],
 ['VMA', `${fmtPace(paces.vma.fast)}-${fmtPace(paces.vma.slow)}`]].map(([k, v]) => `<span class="ps"><span>${k}</span><b>${v}</b></span>`).join('')}</div>
-<details class="howto cal-exp"><summary>Mettre les séances dans le calendrier de l'iPhone</summary>
-<ol>
-<li>Appuie sur <b>Télécharger le calendrier</b>, puis sur <b>Tout ajouter</b>.</li>
-<li>Choisis un calendrier à part, nommé <b>Prépa</b> (Calendrier › Calendriers › Ajouter un calendrier, une seule fois).</li>
-<li>Tu as déplacé une séance ? Dans Calendrier › Calendriers, supprime le calendrier <b>Prépa</b> (toutes ses séances partent d'un coup), recrée-le, puis télécharge à nouveau.</li>
-</ol>
-<button type="button" class="btn primary" id="icsBtn">📅 Télécharger le calendrier</button>
-</details>
-${canDownload && weekFit.length ? `<details class="howto wk-zip"><summary>Séances de la semaine pour la montre (ordinateur)</summary>
-<p class="sub">${weekFit.length} séance${weekFit.length > 1 ? 's' : ''} à venir, déjà ajustée${weekFit.length > 1 ? 's' : ''}. Sans ordinateur ni câble, utilise plutôt le tuto juste en dessous.</p>
-<button type="button" class="btn primary" id="zipBtn">⌚ Séances de la semaine (.zip)</button>
-<ol>
-<li>Sur l'ordinateur, ouvre le .zip.</li>
-<li>Branche la montre en USB (adaptateur USB-C vers USB-A si besoin). Sur Mac, il faut souvent l'app gratuite <b>OpenMTP</b> pour voir la montre.</li>
-<li>Copie les fichiers dans <b>GARMIN › NewFiles</b>, puis débranche la montre.</li>
-<li>Sur la montre : <b>Course à pied › Entraînements</b>.</li>
-</ol>
-<p class="sub">Ça ne marche pas ? Redémarre la montre, ou copie les fichiers dans <b>GARMIN › Workouts</b> à la place.</p>
-</details>` : ''}
-<details class="howto watch-tuto"><summary>⌚ Mettre une séance sur ma montre depuis le téléphone</summary>
-<p class="sub">Tout se fait dans l'app Garmin Connect, la montre reçoit la séance par Bluetooth. Garde la séance ouverte ici pour recopier les étapes.</p>
-<div class="gt-steps">
-    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g1-accueil.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:90%;top:88%"></i></div>
-      <figcaption><b>1.</b> Ouvre l'app <b>Garmin Connect</b>. Touche <b>Plus</b>, en bas à droite.</figcaption></figure>
-    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g2-plus.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:40%;top:70%"></i></div>
-      <figcaption><b>2.</b> Touche <b>Entraînement et planification</b>.</figcaption></figure>
-    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g3-planif.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:25%;top:22%"></i></div>
-      <figcaption><b>3.</b> Touche <b>Entraînements</b>.</figcaption></figure>
-    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g4-entrainements.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:94%;top:48%"></i></div>
-      <figcaption><b>4.</b> Touche <b>Créer un entraînement</b> (le +).</figcaption></figure>
-    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g5-activite.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:25%;top:54%"></i></div>
-      <figcaption><b>5.</b> Choisis <b>Course à pied</b>.</figcaption></figure>
-    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g6-editeur.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:22%;top:50%"></i></div>
-      <figcaption><b>6.</b> Garmin a déjà mis 3 étapes. Touche une étape pour régler sa <b>durée</b> (par défaut « Appui sur touche Lap » : mets plutôt 15 min) et sa <b>cible</b> : choisis <b>Allure</b> et recopie la fourchette affichée dans Prépa.</figcaption></figure>
-    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g6-editeur.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:74%;top:93%"></i></div>
-      <figcaption><b>7.</b> Pour un fractionné, touche <b>Ajouter répét.</b> Mets dedans l'effort (8 min) et la récup (2 min), puis le nombre de fois (3). <b>Ajouter étape</b> sert pour une étape simple en plus.</figcaption></figure>
-    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g6-editeur.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:86%;top:8%"></i></div>
-      <figcaption><b>8.</b> Touche <b>Enregistrer</b>, en haut à droite, et donne le nom de la séance (par exemple « Seuil 3 × 8 min »).</figcaption></figure>
-    <figure class="gt-st"><div class="gt-ph"><div class="gt-ph-top">Seuil 3 × 8 min <span class="gt-ph-ic">⤴</span></div><div class="gt-ph-body"><div class="gt-ph-step">Échauffement<small>15:00</small></div><div class="gt-ph-step r">Course à pied<small>3 × 8:00</small></div><div class="gt-ph-sheet"><b>Envoyer vers l'appareil</b><span class="gt-ph-row">⌚ Ma montre</span></div></div><i class="gt-tap" style="left:88%;top:4%"></i><span class="gt-dessin">Dessin</span></div>
-      <figcaption><b>9.</b> Ouvre la séance enregistrée, touche l'<b>icône d'envoi</b> en haut à droite, puis choisis ta montre. Elle la reçoit à la prochaine synchro.</figcaption></figure>
-    <figure class="gt-st"><div class="gt-wt"><div class="gt-wt-face"><span class="gt-wt-k">Entraînements</span><b>Seuil 3 × 8 min</b><span class="gt-wt-o">Faire l'entraînement</span></div><span class="gt-wt-b up">MENU</span><span class="gt-wt-b st">START</span></div>
-      <figcaption><b>10.</b> Sur la montre : <b>START</b>, choisis <b>Course</b>, maintiens <b>MENU</b>, puis <b>Entraînement › Entraînements</b> › ta séance › <b>Faire l'entraînement</b>. Appuie sur <b>START</b> pour partir : la montre te guide étape par étape.</figcaption></figure>
-  </div>
-  <details class="gt-q"><summary>Ça ne marche pas ?</summary><div class="gt-exp">
-    <span><b>La séance n'arrive pas sur la montre</b> : ouvre l'app Garmin Connect, la montre près de toi, et attends la synchro (ou tire l'écran vers le bas pour la forcer).</span>
-    <span><b>Les noms ne sont pas exactement les mêmes</b> : ils changent un peu selon la version de l'app et le modèle de montre. Sur certaines montres, le menu s'appelle <b>Mes entraînements</b>.</span>
-    <span><b>Le bouton s'appelle autrement</b> : sur certaines montres, c'est <b>GPS</b> au lieu de START.</span>
-  </div></details>
-</details>
+<div class="gt-grp">Mettre mes séances…</div>
+<details class="gt-guide"><summary class="gt-gh"><span class="gt-gi">⌚</span><span class="gt-gt"><b>Sur ma montre, depuis le téléphone</b><small>11 étapes · sans ordinateur</small></span></summary><div class="gt-gb"><div class="gt-os" data-os="g"><div class="gt-car"><div class="gt-car-top"><span>Étape <b class="gt-cn">1</b> / 11</span><span>glisse ou touche Suivant</span></div><div class="gt-prog"><i class="gt-pg" style="width:9%"></i></div><div class="gt-track"><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g1-accueil.jpg" alt="" loading="lazy" decoding="async" style="position:absolute;left:0;top:8.8%;width:100%;height:auto"><i class="gt-hl up r" style="left:82.1%;top:77.0%;width:15.5%;height:9.0%"><span>Touche ici</span></i></div><p>Ouvre l'app <b>Garmin Connect</b>. Touche <b>Plus</b>, en bas à droite.</p></div><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g2-plus.jpg" alt="" loading="lazy" decoding="async" style="position:absolute;left:0;top:5.7%;width:100%;height:auto"><i class="gt-hl" style="left:1.0%;top:62.9%;width:98.1%;height:9.7%"><span>Touche ici</span></i></div><p>Touche <b>Entraînement et planification</b>.</p></div><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g3-planif.jpg" alt="" loading="lazy" decoding="async" style="position:absolute;left:0;top:32.7%;width:100%;height:auto"><i class="gt-hl" style="left:1.0%;top:35.7%;width:98.1%;height:9.5%"><span>Touche ici</span></i></div><p>Touche <b>Entraînements</b>.</p></div><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g4-entrainements.jpg" alt="" loading="lazy" decoding="async" style="position:absolute;left:0;top:32.3%;width:100%;height:auto"><i class="gt-hl" style="left:1.0%;top:44.7%;width:98.1%;height:9.5%"><span>Touche ici</span></i></div><p>Touche <b>Créer un entraînement</b>.</p></div><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g5-activite.jpg" alt="" loading="lazy" decoding="async" style="position:absolute;left:0;top:1.4%;width:100%;height:auto"><i class="gt-hl" style="left:1.0%;top:49.4%;width:98.1%;height:9.5%"><span>Touche ici</span></i></div><p>Choisis <b>Course à pied</b>.</p></div><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g6-editeur.jpg" alt="" loading="lazy" decoding="async" style="height:auto;object-fit:cover;object-position:50% 50.3%;aspect-ratio:4/5"><i class="gt-hl" style="left:3.8%;top:45.0%;width:92.4%;height:9.9%"><span>Touche ici</span></i></div><p>Touche une étape. Règle sa <b>durée</b> (par exemple 15 min, au lieu de « Appui sur touche Lap ») et sa <b>cible</b> : <b>Allure</b>, avec la fourchette de la séance.</p></div><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g6-editeur.jpg" alt="" loading="lazy" decoding="async" style="height:auto;object-fit:cover;object-position:50% 100.0%;aspect-ratio:4/5"><i class="gt-hl up r" style="left:51.9%;top:85.0%;width:44.3%;height:5.9%"><span>Touche ici</span></i></div><p>Fractionné ? Touche <b>Ajouter répét.</b> Mets dedans l'effort (8 min) et la récup (2 min), puis le nombre de fois.</p></div><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g6-editeur.jpg" alt="" loading="lazy" decoding="async" style="height:auto;object-fit:cover;object-position:50% 0.0%;aspect-ratio:4/5"><i class="gt-hl" style="left:21.0%;top:4.6%;width:56.2%;height:13.7%"><span>Touche ici</span></i></div><p>Touche le nom en haut (« Entraînement course à pied (2) ») et remplace-le par celui de la séance, par exemple <b>S2 E1 3x9' @4:40</b>. Puis touche <b>Enregistrer</b>, en haut à droite.</p></div><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g7-envoi.jpg" alt="" loading="lazy" decoding="async" style="height:auto;object-fit:cover;object-position:50% 0.0%;aspect-ratio:4/5"><i class="gt-hl r" style="left:75.2%;top:9.9%;width:10.5%;height:8.4%"><span>Touche ici</span></i></div><p>Ouvre la séance enregistrée. Touche l'<b>icône d'envoi</b>, en haut à droite, puis choisis ta montre.</p></div><div class="gt-slide"><div class="gt-shot"><img src="tuto-img/g8-synchro.jpg" alt="" loading="lazy" decoding="async" style="position:absolute;left:0;top:32.7%;width:100%;height:auto"><i class="gt-hl r" style="left:68.1%;top:46.0%;width:12.9%;height:9.5%"><span>Touche ici</span></i></div><p>Reviens sur l'accueil et touche le bouton de <b>synchronisation</b>, à côté de ta montre. La séance arrive sur la montre.</p></div><div class="gt-slide"><div class="gt-shot gt-draw"><div class="gt-wt"><div class="gt-wt-face"><span class="gt-wt-k">Entraînements</span><b>Seuil 3 × 8 min</b><span class="gt-wt-o">Faire l'entraînement</span></div><span class="gt-wt-b up">MENU</span><span class="gt-wt-b st">START</span></div><span class="gt-dessin">Dessin</span></div><p>Sur la montre : <b>START</b> › <b>Course</b> › maintiens <b>MENU</b> › <b>Entraînements</b> › ta séance › <b>Faire l'entraînement</b>. <b>START</b> pour partir : la montre te guide.</p></div></div><div class="gt-car-nav"><button type="button" class="btn gt-prev" disabled>‹ Précédent</button><button type="button" class="btn primary gt-next">Suivant ›</button></div></div><details class="gt-hint"><summary>Ça ne marche pas ?</summary><div><span><b>La séance n'arrive pas</b> : ouvre Garmin Connect, la montre à côté, et attends la synchro (ou tire l'écran vers le bas).</span><span><b>Les noms changent un peu</b> selon l'app et la montre : parfois <b>Mes entraînements</b>.</span><span><b>Pas de bouton START</b> : sur certaines montres, c'est <b>GPS</b>.</span></div></details></div></div></details>
+${canDownload && weekFit.length ? `<details class="gt-guide"><summary class="gt-gh"><span class="gt-gi">💻</span><span class="gt-gt"><b>Sur ma montre, avec un ordinateur</b><small>Toute la semaine d'un coup · câble USB</small></span></summary><div class="gt-gb"><ol class="gt-stp"><li>Télécharge les séances à venir de la semaine, déjà ajustées.<button type="button" class="btn primary" id="zipBtn">⌚ Télécharger le .zip (${weekFit.length} séance${weekFit.length > 1 ? 's' : ''})</button></li><li>Sur l'ordinateur, ouvre le <b>.zip</b>.</li><li>Branche la montre en USB (adaptateur USB-C si besoin). Sur Mac, ouvre l'app gratuite <b>OpenMTP</b>.</li><li>Copie les fichiers dans <b>GARMIN › NewFiles</b>, puis débranche.</li><li>Sur la montre : <b>Course à pied › Entraînements</b>.</li></ol><div class="gt-note">Rien ne s'affiche ? Redémarre la montre, ou copie dans <b>GARMIN › Workouts</b>.</div></div></details>` : ''}
+<details class="gt-guide"><summary class="gt-gh"><span class="gt-gi">📅</span><span class="gt-gt"><b>Dans le calendrier de l'iPhone</b><small>3 étapes · toutes les séances à venir</small></span></summary><div class="gt-gb"><ol class="gt-stp"><li>Une seule fois : app Calendrier › Calendriers › <b>Ajouter un calendrier</b>, nomme-le <b>Prépa</b>.</li><li>Télécharge les séances, puis touche <b>Tout ajouter</b> et choisis <b>Prépa</b>.<button type="button" class="btn primary" id="icsBtn">📅 Télécharger le calendrier</button></li><li>Séance déplacée ? Supprime le calendrier <b>Prépa</b> (toutes ses séances partent d'un coup), recrée-le, puis télécharge à nouveau.</li></ol></div></details>
 </section>
 <h1 class="tab-title" data-tab="data">Données d'entraînement</h1>
 <section class="kpis6" data-tab="data">
@@ -1019,11 +974,16 @@ plugins: { tooltip: { filter: (i) => i.datasetIndex === 2, callbacks: { label: (
 mk('cRhr', { type: 'line',
 data: { labels: d60Labels, datasets: [{ label: 'FC repos', data: rhr, ...thin(C.serious) }] },
 options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ reverse: true }) }, plugins: { tooltip: { callbacks: { label: (c) => ` ${c.raw} bpm` } } } } });
-mk('cSleep', { type: 'bar',
-data: { labels: slCols.map((c) => c.lbl.split(' ')), datasets: [...PHASES.map(([k, l, c]) => ({ label: l === 'Éveillé' ? 'Éveil' : l, data: slCols.map((col) => slVal(col.nights, k)), ...bar(cssColor(c)), borderRadius: 0, maxBarThickness: 18, stack: 's' })),
+// Sommeil : zone grise pour les 3 semaines passées, trait pointillé, puis cette semaine.
+const slZones = { id: 'slZones', beforeDatasetsDraw(ch) { const { ctx, chartArea: a, scales: { x } } = ch; const mid = (x.getPixelForValue(2) + x.getPixelForValue(3)) / 2, l = x.getPixelForValue(0) - (x.getPixelForValue(1) - x.getPixelForValue(0)) / 2;
+ctx.save(); ctx.fillStyle = C.muted; ctx.globalAlpha = .12; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(l, a.top - 16, mid - l - 3, a.bottom - a.top + 16, 6) : ctx.rect(l, a.top - 16, mid - l - 3, a.bottom - a.top + 16); ctx.fill();
+ctx.strokeStyle = C.muted; ctx.globalAlpha = .7; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(mid, a.top - 16); ctx.lineTo(mid, a.bottom); ctx.stroke(); ctx.globalAlpha = 1; ctx.setLineDash([]);
+ctx.fillStyle = C.muted; ctx.font = '600 10px system-ui, sans-serif'; ctx.textBaseline = 'top'; ctx.textAlign = 'center'; const pt = ctx.measureText('Moyenne / nuit').width < mid - l - 8 ? 'Moyenne / nuit' : 'Moy. / nuit'; ctx.fillText(pt, (l + mid) / 2, a.top - 13); ctx.fillText('Cette semaine', (mid + a.right) / 2, a.top - 13); ctx.restore(); } };
+mk('cSleep', { type: 'bar', plugins: [slZones],
+data: { labels: slCols.map((c) => c.lbl), datasets: [...PHASES.map(([k, l, c]) => ({ label: l === 'Éveillé' ? 'Éveil' : l, data: slCols.map((col) => slVal(col.nights, k)), ...bar(cssColor(c)), borderRadius: 0, maxBarThickness: 18, stack: 's' })),
 ...(slRest.some((v) => v != null) ? [{ label: 'Sans détail', data: slRest, ...bar(cssColor('axis')), borderRadius: 0, maxBarThickness: 18, stack: 's' }] : [])] },
-options: { interaction: hover, scales: { x: { ...scaleX(), stacked: true, ticks: { color: C.muted, autoSkip: false, maxRotation: 0, font: { size: 10 } } }, y: scaleY({ stacked: true, min: 0, ticks: { color: C.muted, stepSize: 2, callback: (v) => v + ' h' } }) },
-plugins: { tooltip: { filter: (it) => it.raw != null, callbacks: { title: (it) => { const c = slCols[it[0].dataIndex]; return c.wk ? `${c.lbl} · moyenne de ${c.nights.length} nuit${c.nights.length > 1 ? 's' : ''}` : c.lbl; },
+options: { interaction: hover, layout: { padding: { top: 18 } }, scales: { x: { ...scaleX(), stacked: true, ticks: { color: C.muted, autoSkip: false, maxRotation: 0, font: { size: 10 } } }, y: scaleY({ stacked: true, min: 0, ticks: { color: C.muted, stepSize: 2, callback: (v) => v + ' h' } }) },
+plugins: { tooltip: { filter: (it) => it.raw != null, callbacks: { title: (it) => { const c = slCols[it[0].dataIndex]; return c.wk ? `${c.lbl} · moyenne de ${c.nights.length} nuit${c.nights.length > 1 ? 's' : ''}` : c.full; },
 label: (c) => (c.raw == null ? null : ` ${c.dataset.label} ${hm(c.raw)}`),
 footer: (it) => { const c = slCols[it[0].dataIndex], t = c.nights.filter((n) => n.sleepTimeSeconds), sc = avg(c.nights.map(sleepScore).filter(Boolean));
 return t.length ? `Sommeil ${hm(avg(t.map((n) => n.sleepTimeSeconds / 3600)))}${isFinite(sc) ? ` · score ${fmt0(sc)}` : ''}` : ''; } } } } } });
@@ -1245,4 +1205,16 @@ if (ro.mi != null) app.querySelectorAll('.cal-month').forEach((m) => { m.hidden 
 requestAnimationFrame(() => window.scrollTo(0, ro.y || 0)); } } catch (err) { /* private mode */ }
 window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (NAV.some(([k]) => k === h)) setTab(h); });
 drawCharts(true);
+})();
+// Tuto montre : carrousel (Précédent / Suivant, glisser) et choix Garmin / Apple Watch.
+(function () {
+const upd = (c) => { const tr = c.querySelector('.gt-track'), n = tr.children.length, i = Math.round(tr.scrollLeft / tr.clientWidth);
+c.querySelector('.gt-cn').textContent = i + 1; c.querySelector('.gt-pg').style.width = ((i + 1) / n * 100) + '%';
+c.querySelector('.gt-prev').disabled = i <= 0; c.querySelector('.gt-next').disabled = i >= n - 1; };
+document.addEventListener('click', (e) => { const b = e.target.closest('.gt-prev, .gt-next');
+if (b) { const c = b.closest('.gt-car'), tr = c.querySelector('.gt-track'), i = Math.round(tr.scrollLeft / tr.clientWidth) + (b.classList.contains('gt-next') ? 1 : -1);
+tr.scrollTo({ left: i * tr.clientWidth, behavior: 'smooth' }); return; }
+const o = e.target.closest('[data-gtos]'); if (o) { const g = o.closest('.gt-gb'); g.querySelectorAll('[data-gtos]').forEach((x) => x.classList.toggle('on', x === o));
+g.querySelectorAll('.gt-os').forEach((x) => { x.hidden = x.dataset.os !== o.dataset.gtos; }); } });
+document.addEventListener('scroll', (e) => { const t = e.target; if (t.classList && t.classList.contains('gt-track')) requestAnimationFrame(() => upd(t.closest('.gt-car'))); }, true);
 })();

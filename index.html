@@ -27,21 +27,21 @@
   window.DATA_READY.catch(function () {}); // handled again below; this only silences the early warning
 })();
 </script>
-<link rel="stylesheet" href="styles.css?v=20261121d">
-<link rel="preload" href="app.js?v=20261121d" as="script">
+<link rel="stylesheet" href="styles.css?v=20261121f">
+<link rel="preload" href="app.js?v=20261121f" as="script">
 </head>
 <body>
 <div id="app"><div class="boot"><span class="spinner"></span>Chargement de tes données…</div></div>
-<script src="config.js?v=20261121d"></script>
+<script src="config.js?v=20261121f"></script>
 <script src="data/laps.js" onerror="window.GARMIN_LAPS={}"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="utils.js?v=20261121d"></script>
-<script src="fit.js?v=20261121d"></script>
-<script src="plan.js?v=20261121d"></script>
-<script src="score.js?v=20261121d"></script>
-<script src="sync.js?v=20261121d"></script>
-<script src="course.js?v=20261121d"></script>
-<script src="movekit.js?v=20261121d"></script>
+<script src="utils.js?v=20261121f"></script>
+<script src="fit.js?v=20261121f"></script>
+<script src="plan.js?v=20261121f"></script>
+<script src="score.js?v=20261121f"></script>
+<script src="sync.js?v=20261121f"></script>
+<script src="course.js?v=20261121f"></script>
+<script src="movekit.js?v=20261121f"></script>
 <script>
 // The Garmin data lives in data.json, refreshed by GitHub Actions. Once it is there, app.js
 // builds the page. Real watch laps (data/laps.js) take precedence over the rebuilt ones.
@@ -61,7 +61,7 @@
     window.GARMIN_DATA_MISSING = true;
   }).then(function () {
     var s = document.createElement('script');
-    s.src = 'app.js?v=20261121d';
+    s.src = 'app.js?v=20261121f';
     s.onerror = function () { fail('Le fichier app.js n\'a pas pu être chargé.'); };
     document.body.appendChild(s);
   });
