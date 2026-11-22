@@ -85,6 +85,26 @@ const crc = crc16(all);
 all.push(crc & 0xFF, (crc >> 8) & 0xFF);
 return new Uint8Array(all);
 }
+// Zip sans compression (STORE) : plusieurs .fit en un seul fichier.
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zip(files) {
+const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+const u16 = (v) => [v & 0xFF, (v >> 8) & 0xFF], u32 = (v) => [v & 0xFF, (v >> 8) & 0xFF, (v >> 16) & 0xFF, (v >>> 24) & 0xFF];
+files.forEach(({ name, bytes }) => {
+const n = enc.encode(name), c = crc32(bytes);
+const head = [...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(c), ...u32(bytes.length), ...u32(bytes.length), ...u16(n.length), ...u16(0)];
+const local = new Uint8Array([0x50, 0x4B, 0x03, 0x04, ...head, ...n]);
+parts.push(local, bytes);
+central.push(new Uint8Array([0x50, 0x4B, 0x01, 0x02, ...u16(20), ...head, ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off), ...n]));
+off += local.length + bytes.length;
+});
+const cdSize = central.reduce((a, x) => a + x.length, 0);
+const end = new Uint8Array([0x50, 0x4B, 0x05, 0x06, ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(off), ...u16(0)]);
+const all = [...parts, ...central, end], out = new Uint8Array(all.reduce((a, x) => a + x.length, 0)); let p = 0;
+all.forEach((x) => { out.set(x, p); p += x.length; });
+return out;
+}
 function download(filename, bytes) {
 const blob = new Blob([bytes], { type: 'application/octet-stream' });
 const a = document.createElement('a');
@@ -93,5 +113,5 @@ a.download = filename;
 document.body.appendChild(a); a.click(); a.remove();
 setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
-window.FitWorkout = { encodeWorkout, download, crc16 };
+window.FitWorkout = { encodeWorkout, download, crc16, zip };
 })();

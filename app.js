@@ -116,9 +116,9 @@ const acute = sumLoad(today, 7) / 7, chronic = sumLoad(today, 28) / 28;
 const acr = chronic > 0 ? acute / chronic : NaN;
 const acrStatus = !isFinite(acr) ? { c: V('muted'), i: '?', t: 'Pas assez de données' }
 : acr < 0.8 ? { c: V('warning'), i: '↓', t: 'Sous-charge' }
-: acr <= 1.3 ? { c: V('good'), i: '✓', t: 'Zone optimale' }
+: acr <= 1.3 ? { c: V('good'), i: '✓', t: 'Progression régulière' }
 : acr <= 1.5 ? { c: V('serious'), i: '!', t: 'Charge en hausse' }
-: { c: V('critical'), i: '!!', t: 'Risque de surcharge' };
+: { c: V('critical'), i: '!!', t: 'Hausse trop brutale' };
 const zoneSec = [1, 2, 3, 4, 5].map((z) => inLast(prepRuns, 28).reduce((s, r) => s + (r['hrTimeInZone_' + z] || 0), 0));
 const zoneTotal = zoneSec.reduce((a, b) => a + b, 0);
 const zoneColors = [1, 2, 3, 4, 5].map((z) => V('z' + z));
@@ -138,10 +138,17 @@ const rhr7 = avg(lastVals(rhr, 7)), sleep7 = avg(lastVals(sleepH, 7));
 const sleep30 = days30.map((d) => sleepMap.get(dayKey(d)) || null);
 const sleepScore = (s) => (s && isFinite(s.score) && s.score > 0 ? s.score : null);
 const score7 = avg(lastVals(sleep30.map(sleepScore), 7));
-const PHASES = [['deepSeconds', 'Profond', 'ph-1'], ['lightSeconds', 'Léger', 'series-7'], ['remSeconds', 'Paradoxal', 't-test'], ['awakeSeconds', 'Éveillé', 'warning']];
+const PHASES = [['deepSeconds', 'Profond', 'sl-deep'], ['lightSeconds', 'Léger', 'sl-light'], ['remSeconds', 'Paradoxal', 'sl-rem'], ['awakeSeconds', 'Éveillé', 'sl-awake']];
 const phase7 = PHASES.map(([k]) => avg(lastVals(sleep30.map((s) => (s && isFinite(s[k]) ? s[k] / 3600 : null)), 7)));
 const hasPhases = phase7.slice(0, 3).some((v) => isFinite(v) && v > 0);
 const sleepWeek = (mon) => Array.from({ length: 7 }, (_, i) => sleepMap.get(dayKey(addDays(mon, i)))).filter(Boolean);
+// Graphique sommeil : 3 semaines passées (moyennes) + les 7 nuits de cette semaine, par phase.
+const slCols = [...[3, 2, 1].map((n) => ({ lbl: `S-${n}`, nights: sleepWeek(addDays(thisMon, -7 * n)), wk: true })),
+...Array.from({ length: 7 }, (_, i) => { const d = addDays(thisMon, i), n = d <= today ? sleepMap.get(dayKey(d)) : null; return { lbl: `${d.toLocaleDateString('fr-FR', { weekday: 'short' }).replace('.', '').slice(0, 3)} ${d.getDate()}`, nights: n ? [n] : [], wk: false }; })];
+const slVal = (nights, k) => { const v = nights.map((n) => (isFinite(n[k]) && n[k] > 0 ? n[k] / 3600 : null)).filter((x) => x != null); return v.length ? Math.round(avg(v) * 100) / 100 : null; };
+const slRest = slCols.map((c) => { const v = c.nights.filter((n) => !PHASES.slice(0, 3).some(([k]) => n[k] > 0) && n.sleepTimeSeconds).map((n) => n.sleepTimeSeconds / 3600); return v.length ? Math.round(avg(v) * 100) / 100 : null; });
+const slThis = slCols.slice(3).flatMap((c) => c.nights).filter((n) => n.sleepTimeSeconds);
+const sleepThisWk = slThis.length ? avg(slThis.map((n) => n.sleepTimeSeconds / 3600)) : NaN, scoreThisWk = avg(slThis.map(sleepScore).filter(Boolean));
 const latestHrv = [...hrv].filter((h) => h.lastNightAvg).sort((a, b) => (a.calendarDate < b.calendarDate ? 1 : -1))[0];
 const zArr = Array.isArray(D.hrZones) ? D.hrZones : [];
 const runZones = zArr.find((z) => z.sport === 'RUNNING') || zArr.find((z) => z.sport === 'DEFAULT');
@@ -324,6 +331,7 @@ return `<details class="move"><summary>${s.moved ? `Déplacée (prévue ${s.orig
 <div class="mv-days">${chips}</div>
 <div class="mv-acts">${hasNext ? `<button type="button" class="btn sm" data-mvnext="${i}">À la semaine prochaine</button>` : ''}<button type="button" class="btn sm" data-mvdel="${i}">Supprimer</button>${s.moved ? `<button type="button" class="btn sm" data-mvreset="${i}">Remettre au jour prévu</button>` : ''}</div>
 <div class="mv-out" hidden></div><p class="note">• = une séance est déjà prévue ce jour-là : les autres se décalent si besoin, pour garder 48 h entre deux séances dures.</p></details>`; };
+const canMoveCal = (x) => !!MK && !x.run && !x.missed && x.type !== 'race' && x.date >= startOfDay(today) && !!weekOfS(x);
 const saveMoves = () => { try { localStorage.setItem('moves', JSON.stringify(moves)); } catch (err) { /* private mode */ } location.hash = '#plan'; location.reload(); };
 const toVal = (s, d) => Math.round((startOfDay(d) - monday(s.origDate)) / DAY);
 // Met une séance dans la semaine suivante, au même jour si possible. Retourne false s'il n'y a pas de place.
@@ -368,7 +376,6 @@ ${hasSteps ? `<span class="s-more">${sc ? 'Analyse et étapes de la séance' : '
 ${feelHtml(s, i)}
 ${moveHtml(s, i)}
 ${hasSteps ? `<div class="s-steps" ${open ? '' : 'hidden'}>${scoreDetail}<ol>${stepsHtml(s.steps)}</ol>${r ? '' : fuelHtml(s)}
-${canDownload ? `<button type="button" class="btn fit-btn ${isNext ? 'primary' : ''}" data-sid="${i}">⌚ Fichier pour la montre (.fit)</button>` : ''}
 </div>` : ''}
 </div>`;
 };
@@ -502,7 +509,6 @@ const longDone = Math.max(0, ...pRuns.map((r) => km(r.distance)));
 if (prevPlanWeek && longDone < prevPlanWeek.longKm * 0.8 && prevPlanWeek.longKm) out.push({ t: `Ta plus longue sortie a fait ${fmt1(longDone)} km pour ${prevPlanWeek.longKm} prévus.`, d: 'La sortie longue est la séance clé du marathon. Cette semaine, protège-la : bloque le créneau et pars lentement.' });
 if (!out.length) out.push({ t: `Semaine solide : ${pRuns.length} sorties, ${fmt0(pKm)} km${isFinite(pEasy) ? `, ${Math.round(pEasy * 100)} % en zones 1-2` : ''}.`, d: current.key === 'base' ? 'Continue pareil. Sur la sortie longue, les blocs soutenus doivent rester confortables : si tu finis sans marge, tu es parti trop vite.' : 'Continue pareil. Sur les blocs à allure marathon, vise la régularité au kilomètre plutôt que la vitesse.' }); return out;
 })();
-const factsTxt = `Semaine du ${prevMon.getDate()} au ${prevEnd.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })} : ${pRuns.length} course${pRuns.length > 1 ? 's' : ''}${pRuns.length ? ` (${fmt0(pKm)} km)` : ''}${pOther.length ? ` · ${pOther.length} autre${pOther.length > 1 ? 's' : ''} séance${pOther.length > 1 ? 's' : ''} (${otherTxt})` : ''}${pSleep.length ? ` · sommeil ${hm(avg(pSleep))}` : ''}${pHrv.length ? ` · VFC ${fmt0(avg(pHrv.map((h) => h.lastNightAvg)))} ms` : ''}${isFinite(pRhr) ? ` · FC repos ${fmt0(pRhr)} bpm` : ''}`;
 // Conseils du coach : 3 blocs, jusqu'à 3 conseils chacun, du plus important au moins important.
 const strip = (h) => String(h).replace(/<[^>]+>/g, '');
 const pastTips = [];
@@ -538,7 +544,9 @@ return out.sort((a, b) => b.w - a.w).slice(0, 3); })();
 const reminder = (() => { const s2 = nextSession; if (!s2 || s2.date > addDays(today, 1)) return '';
 const act = flatSteps(s2.steps).find((x) => x.intensity === 'active' && x.target);
 return `<div class="coach-rem"><b>${+s2.date === +today ? 'Aujourd\'hui' : 'Demain'} · ${esc(s2.title)}</b><span>${act ? `Vise ${tgtTxt(act).replace(/<[^>]+>/g, '')} sur les blocs.` : esc(s2.desc)}</span>${fuelHtml(s2)}<button type="button" class="btn sm" data-goto="${allSessions.indexOf(s2)}">Voir la séance</button></div>`; })();
-const tipBlock = (title, list, color) => `<div class="tip-blk"><div class="tip-k"><span class="sw" style="background:${color}"></span>${title}</div>${list.map((x) => `<div class="tip"><div class="tip-t"><span class="tip-tag">${esc(x.k)}</span>${esc(x.t)}</div><div class="tip-d">${esc(x.d)}</div></div>`).join('')}</div>`;
+const tipHtml = (x) => `<div class="tip"><div class="tip-t"><span class="tip-tag">${esc(x.k)}</span>${esc(x.t)}</div>${x.d ? `<details class="tip-why"><summary>Pourquoi</summary><div class="tip-d">${esc(x.d)}</div></details>` : ''}</div>`;
+const tipBlock = (title, list, color) => list.length ? `<div class="tip-blk"><div class="tip-k"><span class="sw" style="background:${color}"></span>${title}</div>${tipHtml(list[0])}</div>` : '';
+const tipRest = (title, list) => list.length > 1 ? `<div class="tip-blk"><div class="tip-k">${title}</div>${list.slice(1).map(tipHtml).join('')}</div>` : '';
 const tKey = dayKey(today);
 const hrvT = hrvMap.get(tKey), sleepSec = sleepMap.get(tKey)?.sleepTimeSeconds, sleepSc = sleepScore(sleepMap.get(tKey)), rhrT = rhrOf(today);
 const rhrBase28 = avg(Array.from({ length: 28 }, (_, i) => rhrOf(addDays(today, -1 - i))).filter(Boolean));
@@ -587,7 +595,7 @@ sub: `${fmt1(km(runToday.distance))} km en ${fmtDur(runToday.duration)} (${fmtPa
 btn: s ? `<button type="button" class="btn" data-goto="${allSessions.indexOf(s)}">Voir l'analyse</button>` : '' }; }
 if (todayS) { const kt = keyTarget(todayS);
 return { title: esc(todayS.title), sub: `${typeLabel[todayS.type]} · ≈ ${fmt1(todayS.km)} km · ${fmtHM(todayS.sec)}${kt ? ' · ' + kt : ''}`,
-btn: `<div class="today-btns"><button type="button" class="btn primary" data-goto="${allSessions.indexOf(todayS)}">Voir la séance</button>${canDownload && todayS.steps.length ? `<button type="button" class="btn fit-btn" data-sid="${allSessions.indexOf(todayS)}">⌚ Mettre sur ma montre</button>` : ''}</div>` }; }
+btn: `<div class="today-btns"><button type="button" class="btn primary" data-goto="${allSessions.indexOf(todayS)}">Voir la séance</button></div>` }; }
 if (catchUp) return { title: 'Une séance à rattraper', sub: catchUp[0].toUpperCase() + catchUp.slice(1), btn: '' };
 return { title: 'Repos', sub: 'Pas de course prévue. Marche, mobilité ou 20 min de renforcement si tu as de l\'énergie.', btn: '' };
 })();
@@ -617,6 +625,7 @@ const fetchedTxt = fetched.toLocaleString('fr-FR', { dateStyle: 'medium', timeSt
 const ageMs = Date.now() - fetched, stale = ageMs > 30 * 3600000; // synchro quotidienne à 20 h (Polynésie)
 const ago = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return m < 1 ? 'à l\'instant' : m < 60 ? `il y a ${m} min` : m < 2880 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
 const curEnd = addDays(curWeek.monday, 6);
+const weekFit = curWeek.sessions.filter((s) => !s.run && s.date >= today && s.steps && s.steps.length && s.type !== 'race');
 const dayMon = (d) => d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
 const weekNo = new Map(); plan.weeks.forEach((w) => w.sessions.forEach((s) => weekNo.set(s, w.index + 1)));
 const F = (s) => (s.score && s.score.facts) || {};
@@ -694,7 +703,7 @@ let cells = '', list = '', lastWk = '';
 for (let d = new Date(start); d <= end || d.getDay() !== 1; d = addDays(d, 1)) {
 const k = dayKey(d), inM = d.getMonth() === m.getMonth(), list = byDay.get(k) || [];
 const isToday = k === dayKey(today), isRace = k === dayKey(raceDate);
-cells += `<div class="cal-d${inM ? '' : ' out'}${isToday ? ' today' : ''}${isRace ? ' race' : ''}${d < startOfDay(today) ? ' past' : ''}"><span class="cal-n">${d.getDate()}</span>${inM ? list.map((x) => `<button type="button" class="cal-s ${x.run ? 'done' : x.missed ? 'miss' : ''}" style="--c:${typeColor[x.type]}" data-goto="${allSessions.indexOf(x)}" title="${esc(x.title)}"><b>${x.run ? '✓ ' : x.missed ? '✗ ' : ''}<em>${esc(x.type === 'long' ? 'SL' : x.type === 'easy' ? 'Footing' : x.type === 'race' ? 'Course' : x.type === 'test' ? 'Test' : 'Qualité')}</em></b><span class="tnum">${fmt0(x.run ? km(x.run.distance) : x.km)} km</span></button>`).join('') : ''}</div>`;
+cells += `<div class="cal-d${inM ? '' : ' out'}${isToday ? ' today' : ''}${isRace ? ' race' : ''}${d < startOfDay(today) ? ' past' : ''}" data-day="${k}"><span class="cal-n">${d.getDate()}</span>${inM ? list.map((x) => `<button type="button" class="cal-s ${x.run ? 'done' : x.missed ? 'miss' : ''}" style="--c:${typeColor[x.type]}" data-goto="${allSessions.indexOf(x)}"${canMoveCal(x) ? ' draggable="true" data-calmv="1"' : ''} title="${esc(x.title)}"><b>${x.run ? '✓ ' : x.missed ? '✗ ' : ''}<em>${esc(x.type === 'long' ? 'SL' : x.type === 'easy' ? 'Footing' : x.type === 'race' ? 'Course' : x.type === 'test' ? 'Test' : 'Qualité')}</em></b><span class="tnum">${fmt0(x.run ? km(x.run.distance) : x.km)} km</span></button>`).join('') : ''}</div>`;
 }
 allSessions.filter((x) => { const d = x.run ? x.run._date : x.date; return d.getMonth() === m.getMonth() && d.getFullYear() === m.getFullYear(); })
 .sort((a, b) => (a.run ? a.run._date : a.date) - (b.run ? b.run._date : b.date)).forEach((x) => {
@@ -714,7 +723,9 @@ ${calMonths.map((c, i) => `<div class="cal-month" data-mi="${i}" ${i === calCur 
 <div class="cal-list">${c.list || '<p class="note">Aucune séance ce mois-ci.</p>'}</div>
 </div>`).join('')}
 <div class="legend">${['easy', 'quality', 'long', 'test'].map((t) => `<span><span class="sw" style="background:${typeColor[t]}"></span>${typeLabel[t]}</span>`).join('')}<span>✓ faite · ✗ manquée</span></div>
-<p class="note">Touche une séance pour voir son détail.</p>
+<div class="cal-pick" hidden><span></span><button type="button" class="btn sm" data-calcancel>Annuler</button></div>
+<div class="mv-out cal-out" hidden></div>
+<p class="note">Touche une séance pour voir son détail. Pour la déplacer : appui long sur iPhone (ou ctrl-clic, ou glisser-déposer sur ordinateur), puis touche le nouveau jour.</p>
 </section>`;
 // ===== 6. Construction de la page =====
 const ffShow = ff.slice(-Math.min(ff.length, Math.max(56, Math.round((today - planStartMon) / DAY) + 28)));
@@ -777,13 +788,14 @@ ${signals.length ? `<div class="sigs">${signals.map((x) => `<span class="sig lv$
 </div>
 </section>
 <section class="card" data-tab="today">
-<div class="coach-head"><h2>Les conseils du coach</h2><span>${factsTxt}</span></div>
+<div class="coach-head"><h2>Les conseils du coach</h2></div>
 ${reminder}
 <div class="coach-tips">
 ${tipBlock('Semaine passée', pastTips.slice(0, 3), V('t-easy'))}
 ${tipBlock('Cette semaine', weekTips, V('accent'))}
-${trendTips.length ? tipBlock('Tendance 4 semaines', trendTips, V('series-7')) : ''}
+${tipBlock('Tendance 4 semaines', trendTips, V('series-7'))}
 </div>
+${[pastTips.slice(0, 3), weekTips, trendTips].some((l) => l.length > 1) ? `<details class="tip-more"><summary>Voir les autres conseils</summary><div class="coach-tips">${tipRest('Semaine passée', pastTips.slice(0, 3))}${tipRest('Cette semaine', weekTips)}${tipRest('Tendance 4 semaines', trendTips)}</div></details>` : ''}
 </section>
 <h1 class="tab-title" data-tab="plan">Plan d'entraînement</h1>
 <section class="card" id="week" data-tab="plan">
@@ -810,13 +822,46 @@ ${curWeek.removed && curWeek.removed.length ? `<div class="mv-removed">${curWeek
 </ol>
 <button type="button" class="btn primary" id="icsBtn">📅 Télécharger le calendrier</button>
 </details>
-<details class="howto" ${canDownload ? '' : 'hidden'}><summary>Comment mettre une séance sur ma montre ?</summary>
+${canDownload && weekFit.length ? `<details class="howto wk-zip"><summary>Séances de la semaine pour la montre (ordinateur)</summary>
+<p class="sub">${weekFit.length} séance${weekFit.length > 1 ? 's' : ''} à venir, déjà ajustée${weekFit.length > 1 ? 's' : ''}. Sans ordinateur ni câble, utilise plutôt le tuto juste en dessous.</p>
+<button type="button" class="btn primary" id="zipBtn">⌚ Séances de la semaine (.zip)</button>
 <ol>
-<li>Sur un ordinateur, ouvre la séance et clique sur <b>Fichier pour la montre (.fit)</b> : le fichier se télécharge.</li>
-<li>Branche ta montre à l'ordinateur en USB et ouvre-la dans l'Explorateur de fichiers.</li>
-<li>Copie le fichier dans le dossier <code>GARMIN\\NewFiles</code> de la montre, puis débranche-la.</li>
-<li>Sur la montre : <b>Course à pied › Entraînements</b>. La séance y est, avec ses étapes et ses cibles.</li>
+<li>Sur l'ordinateur, ouvre le .zip.</li>
+<li>Branche la montre en USB (adaptateur USB-C vers USB-A si besoin). Sur Mac, il faut souvent l'app gratuite <b>OpenMTP</b> pour voir la montre.</li>
+<li>Copie les fichiers dans <b>GARMIN › NewFiles</b>, puis débranche la montre.</li>
+<li>Sur la montre : <b>Course à pied › Entraînements</b>.</li>
 </ol>
+<p class="sub">Ça ne marche pas ? Redémarre la montre, ou copie les fichiers dans <b>GARMIN › Workouts</b> à la place.</p>
+</details>` : ''}
+<details class="howto watch-tuto"><summary>⌚ Mettre une séance sur ma montre depuis le téléphone</summary>
+<p class="sub">Tout se fait dans l'app Garmin Connect, la montre reçoit la séance par Bluetooth. Garde la séance ouverte ici pour recopier les étapes.</p>
+<div class="gt-steps">
+    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g1-accueil.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:90%;top:88%"></i></div>
+      <figcaption><b>1.</b> Ouvre l'app <b>Garmin Connect</b>. Touche <b>Plus</b>, en bas à droite.</figcaption></figure>
+    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g2-plus.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:40%;top:70%"></i></div>
+      <figcaption><b>2.</b> Touche <b>Entraînement et planification</b>.</figcaption></figure>
+    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g3-planif.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:25%;top:22%"></i></div>
+      <figcaption><b>3.</b> Touche <b>Entraînements</b>.</figcaption></figure>
+    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g4-entrainements.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:94%;top:48%"></i></div>
+      <figcaption><b>4.</b> Touche <b>Créer un entraînement</b> (le +).</figcaption></figure>
+    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g5-activite.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:25%;top:54%"></i></div>
+      <figcaption><b>5.</b> Choisis <b>Course à pied</b>.</figcaption></figure>
+    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g6-editeur.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:22%;top:50%"></i></div>
+      <figcaption><b>6.</b> Garmin a déjà mis 3 étapes. Touche une étape pour régler sa <b>durée</b> (par défaut « Appui sur touche Lap » : mets plutôt 15 min) et sa <b>cible</b> : choisis <b>Allure</b> et recopie la fourchette affichée dans Prépa.</figcaption></figure>
+    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g6-editeur.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:74%;top:93%"></i></div>
+      <figcaption><b>7.</b> Pour un fractionné, touche <b>Ajouter répét.</b> Mets dedans l'effort (8 min) et la récup (2 min), puis le nombre de fois (3). <b>Ajouter étape</b> sert pour une étape simple en plus.</figcaption></figure>
+    <figure class="gt-st"><div class="gt-shot"><img src="tuto-img/g6-editeur.jpg" alt="" loading="lazy" decoding="async"><i class="gt-tap" style="left:86%;top:8%"></i></div>
+      <figcaption><b>8.</b> Touche <b>Enregistrer</b>, en haut à droite, et donne le nom de la séance (par exemple « Seuil 3 × 8 min »).</figcaption></figure>
+    <figure class="gt-st"><div class="gt-ph"><div class="gt-ph-top">Seuil 3 × 8 min <span class="gt-ph-ic">⤴</span></div><div class="gt-ph-body"><div class="gt-ph-step">Échauffement<small>15:00</small></div><div class="gt-ph-step r">Course à pied<small>3 × 8:00</small></div><div class="gt-ph-sheet"><b>Envoyer vers l'appareil</b><span class="gt-ph-row">⌚ Ma montre</span></div></div><i class="gt-tap" style="left:88%;top:4%"></i><span class="gt-dessin">Dessin</span></div>
+      <figcaption><b>9.</b> Ouvre la séance enregistrée, touche l'<b>icône d'envoi</b> en haut à droite, puis choisis ta montre. Elle la reçoit à la prochaine synchro.</figcaption></figure>
+    <figure class="gt-st"><div class="gt-wt"><div class="gt-wt-face"><span class="gt-wt-k">Entraînements</span><b>Seuil 3 × 8 min</b><span class="gt-wt-o">Faire l'entraînement</span></div><span class="gt-wt-b up">MENU</span><span class="gt-wt-b st">START</span></div>
+      <figcaption><b>10.</b> Sur la montre : <b>START</b>, choisis <b>Course</b>, maintiens <b>MENU</b>, puis <b>Entraînement › Entraînements</b> › ta séance › <b>Faire l'entraînement</b>. Appuie sur <b>START</b> pour partir : la montre te guide étape par étape.</figcaption></figure>
+  </div>
+  <details class="gt-q"><summary>Ça ne marche pas ?</summary><div class="gt-exp">
+    <span><b>La séance n'arrive pas sur la montre</b> : ouvre l'app Garmin Connect, la montre près de toi, et attends la synchro (ou tire l'écran vers le bas pour la forcer).</span>
+    <span><b>Les noms ne sont pas exactement les mêmes</b> : ils changent un peu selon la version de l'app et le modèle de montre. Sur certaines montres, le menu s'appelle <b>Mes entraînements</b>.</span>
+    <span><b>Le bouton s'appelle autrement</b> : sur certaines montres, c'est <b>GPS</b> au lieu de START.</span>
+  </div></details>
 </details>
 </section>
 <h1 class="tab-title" data-tab="data">Données d'entraînement</h1>
@@ -825,7 +870,8 @@ ${curWeek.removed && curWeek.removed.length ? `<div class="mv-removed">${curWeek
 <div class="tile"><div class="k">Volume moyen (4 sem.)</div><div class="v tnum">${fmt1(km28avg)}<small>km/sem</small></div><div class="s">Prévu cette semaine : ${curWeek.targetKm} km</div></div>
 <div class="tile"><div class="k">Plus longue sortie (28 j)</div><div class="v tnum">${fmt1(long28)}<small>/ ${plan.maxLongKm} km</small></div><div class="progress"><span style="width:${Math.min(100, (long28 / plan.maxLongKm) * 100)}%"></span></div></div>
 <div class="tile"><div class="k">Temps en zones 1-2 (28 j)</div><div class="v tnum">${isFinite(easyShare) ? Math.round(easyShare * 100) : '–'}<small>%</small></div><div class="s">Cible : environ ${Math.round(EASY_TARGET * 100)} % (3 sorties/sem.)</div></div>
-<div class="tile"><div class="k">Charge aiguë / chronique</div><div class="v tnum">${isFinite(acr) ? acr.toLocaleString('fr-FR', { maximumFractionDigits: 2, minimumFractionDigits: 2 }) : '–'}</div>${statusHtml(acrStatus)}</div>
+<div class="tile"><div class="k">Charge aiguë / chronique</div><div class="v tnum">${isFinite(acr) ? acr.toLocaleString('fr-FR', { maximumFractionDigits: 2, minimumFractionDigits: 2 }) : '–'}</div>${statusHtml(acrStatus)}
+<details class="whatis"><summary>C'est quoi ?</summary><div><p><b>Aiguë</b> : ta charge Garmin moyenne des 7 derniers jours. <b>Chronique</b> : celle des 28 derniers jours. Le ratio compare les deux : 1,0 = tu fais autant que d'habitude.</p><p>Repères proposés par Gabbett (2016) : 0,8 à 1,3 = progression régulière, 1,5 et plus = hausse trop brutale. Ils viennent du cricket, du rugby et du football australien ; l'auteur appelle à la prudence pour les sports individuels.</p><p>Le ratio est aujourd'hui contesté : Impellizzeri et coll. (2021) montrent qu'il ne prédit pas mieux les blessures que la charge de la semaine seule. Sers-t'en comme repère de progression, pas comme prédiction de blessure.</p><p><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4789704/" target="_blank" rel="noopener">Gabbett 2016, Br J Sports Med</a> · <a href="https://doi.org/10.1007/s40279-020-01378-6" target="_blank" rel="noopener">Impellizzeri et coll. 2021, Sports Medicine</a></p></div></details></div>
 <div class="tile"><div class="k">Prochain jalon</div>${miles[0] ? `<div class="v tnum">J-${Math.round((miles[0].date - today) / DAY)}</div><div class="s">${esc(miles[0].label)} · ${fmtDate(miles[0].date)}</div>` : '<div class="v">–</div>'}</div>
 </section>
 ${compareHtml}
@@ -906,12 +952,13 @@ ${recHtml}
 <details class="card recovery" id="recovery" data-tab="recup" open>
 <summary><b>Récupération</b><span class="tnum">VFC ${latestHrv?.lastNightAvg ?? '–'} ms · FC repos ${isFinite(rhr7) ? fmt0(rhr7) : '–'} bpm · Sommeil ${isFinite(sleep7) ? fmt1(sleep7) : '–'} h${isFinite(score7) ? ` (score ${fmt0(score7)})` : ''}</span></summary>
 <div class="grid">
-<div class="card span-4"><h2>VFC nocturne</h2><div class="rec-v tnum">${latestHrv?.lastNightAvg ?? '–'}<small>ms la nuit dernière</small></div><div class="sub">60 jours · ms</div><div class="chart sm"><canvas id="cHrv"></canvas></div>
+<div class="card span-4"><h2>VFC nocturne</h2><div class="rec-v tnum">${latestHrv?.lastNightAvg ?? '–'}<small>ms la nuit dernière</small></div>
+<details class="whatis"><summary>C'est quoi ?</summary><div><p>L'intervalle entre deux battements n'est jamais tout à fait le même. La VFC mesure cette variation pendant la nuit : elle reflète la récupération de ton système nerveux.</p><p>Pour l'entraînement : elle bouge beaucoup d'un jour à l'autre, c'est normal. Ce qui compte, c'est la tendance sur plusieurs jours par rapport à ta propre plage. Une baisse qui dure, avec une FC repos qui monte, va souvent avec de la fatigue accumulée (sauf en affûtage).</p><p><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC3936188/" target="_blank" rel="noopener">Buchheit 2014, Frontiers in Physiology</a></p></div></details><div class="sub">60 jours · ms</div><div class="chart sm"><canvas id="cHrv"></canvas></div>
 <div class="legend"><span><span class="sw" style="background:${V('series-7')}"></span>VFC</span><span><span class="sw" style="background:${V('band')}"></span>Plage normale</span></div></div>
-<div class="card span-4"><h2>FC au repos</h2><div class="rec-v tnum">${isFinite(rhr7) ? fmt0(rhr7) : '–'}<small>bpm, moyenne 7 jours</small></div><div class="sub">60 jours · bpm · axe inversé : plus haut = mieux</div><div class="chart sm"><canvas id="cRhr"></canvas></div></div>
-<div class="card span-4"><h2>Sommeil</h2><div class="rec-v tnum">${isFinite(sleep7) ? fmt1(sleep7) : '–'}<small>h par nuit, moyenne 7 jours${isFinite(score7) ? ` · score ${fmt0(score7)}` : ''}</small></div><div class="sub">30 jours · heures par nuit</div><div class="chart sm"><canvas id="cSleep"></canvas></div>
-${hasPhases ? (() => { const tot = phase7.reduce((a, v) => a + (isFinite(v) ? v : 0), 0); return `<div class="sl-ph" aria-label="Phases de sommeil, moyenne 7 nuits">${PHASES.map(([, l, c], i) => (isFinite(phase7[i]) && phase7[i] > 0 ? `<i style="flex:${phase7[i] / tot} 0 0;background:${V(c)}"></i>` : '')).join('')}</div>
-<div class="legend">${PHASES.map(([, l, c], i) => (isFinite(phase7[i]) && phase7[i] > 0 ? `<span><span class="sw" style="background:${V(c)}"></span>${l} ${hm(phase7[i])}</span>` : '')).join('')}</div>`; })() : ''}</div>
+<div class="card span-4"><h2>FC au repos</h2><div class="rec-v tnum">${isFinite(rhr7) ? fmt0(rhr7) : '–'}<small>bpm, moyenne 7 jours</small></div>
+<details class="whatis"><summary>C'est quoi ?</summary><div><p>Ton cœur au calme, mesuré la nuit par la montre.</p><p>Pour l'entraînement : seule, elle est moins sensible que la VFC et varie d'un jour à l'autre, donc on regarde sa moyenne sur 7 jours. Une hausse durable, surtout avec une VFC en baisse, va souvent avec de la fatigue. Elle compte pour 10 % dans la note d'adaptation du plan.</p><p><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC3936188/" target="_blank" rel="noopener">Buchheit 2014, Frontiers in Physiology</a></p></div></details><div class="sub">60 jours · bpm · axe inversé : plus haut = mieux</div><div class="chart sm"><canvas id="cRhr"></canvas></div></div>
+<div class="card span-4"><h2>Sommeil</h2><div class="rec-v tnum">${isFinite(sleepThisWk) ? fmt1(sleepThisWk) : isFinite(sleep7) ? fmt1(sleep7) : '–'}<small>h par nuit${isFinite(sleepThisWk) ? ' cette semaine' : ', moyenne 7 jours'}${isFinite(scoreThisWk) ? ` · score ${fmt0(scoreThisWk)}` : isFinite(score7) ? ` · score ${fmt0(score7)}` : ''}</small></div><div class="sub">3 semaines passées (moyenne par nuit), puis chaque nuit de cette semaine</div><div class="chart sm"><canvas id="cSleep"></canvas></div>
+<div class="legend">${PHASES.map(([, l, c]) => `<span><span class="sw" style="background:${V(c)}"></span>${l === 'Éveillé' ? 'Éveil' : l}</span>`).join('')}${slRest.some((v) => v != null) ? `<span><span class="sw" style="background:${V('axis')}"></span>Sans détail</span>` : ''}</div></div>
 </div>
 </details>
 <footer data-tab="all"><span>Données Garmin du ${fetchedTxt}${(D.errors || []).length ? ' · ' + D.errors.length + ' source(s) en erreur' : ''}</span><span>Mise à jour automatique à 9 h et 20 h, ou avec le bouton de synchro</span></footer>
@@ -920,6 +967,11 @@ setTimeout(() => app.classList.add('settled'), 1500); // ends the entrance anima
 const reduce = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 let charts = [], C = null, anim = false, activeCmp = cmpKeys[0];
 const drawn = new Set(); // lazily drawn groups: one per compare tab, plus 'recovery'
+// Km écrits à la verticale dans chaque barre (sorties longues).
+const cssColor = (n) => getComputedStyle(document.documentElement).getPropertyValue('--' + n).trim();
+const barKm = { id: 'barKm', afterDatasetsDraw(ch) { const { ctx } = ch; ch.getDatasetMeta(0).data.forEach((b, i) => { const v = ch.data.datasets[0].data[i]; if (v == null) return;
+const h = Math.abs(b.base - b.y), t = `${fmt1(v)} km`; ctx.save(); ctx.font = '600 11px system-ui, sans-serif'; const w = ctx.measureText(t).width;
+const inside = h > w + 8; ctx.translate(b.x, inside ? b.base - 5 : b.y - 5); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = inside ? '#fff' : C.muted; ctx.fillText(t, 0, 0); ctx.restore(); }); } };
 const mk = (id, cfg) => { const el = document.getElementById(id); if (!el) return;
 cfg.options = { animation: anim ? { duration: 500 } : false, ...cfg.options }; charts.push(new Chart(el, cfg)); };
 const scaleX = () => ({ grid: { display: false }, border: { color: C.axis }, ticks: { color: C.muted, maxRotation: 0, autoSkip: true, autoSkipPadding: 12 } });
@@ -947,7 +999,8 @@ ya: scaleY({ beginAtZero: true }), yb: scaleY({ beginAtZero: true }), fa: (v) =>
 type: isBar ? 'bar' : 'line',
 data: { labels, datasets: [{ label: c[x], data, ...(isBar ? bar(C.s1) : line(C.s1)) }] },
 options: { interaction: hover, scales: { x: scaleX(), y },
-plugins: { tooltip: { callbacks: { title, label: (i) => ` ${c[x]} : ${i.raw == null ? '–' : f(i.raw)}` } } } }
+plugins: { tooltip: { callbacks: { title, label: (i) => ` ${c[x]} : ${i.raw == null ? '–' : f(i.raw)}` } } } },
+...(isBar ? { plugins: [barKm] } : {})
 }));
 };
 const drawRecovery = () => {
@@ -964,11 +1017,13 @@ mk('cRhr', { type: 'line',
 data: { labels: d60Labels, datasets: [{ label: 'FC repos', data: rhr, ...thin(C.serious) }] },
 options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ reverse: true }) }, plugins: { tooltip: { callbacks: { label: (c) => ` ${c.raw} bpm` } } } } });
 mk('cSleep', { type: 'bar',
-data: { labels: days30.map(fmtDM), datasets: [{ label: 'Sommeil', data: sleepH.map((v) => (v == null ? null : Math.round(v * 10) / 10)), ...bar(C.s1), maxBarThickness: 10 }] },
-options: { interaction: hover, scales: { x: scaleX(), y: scaleY({ min: Math.min(5, Math.floor(Math.min(...sleepH.filter((v) => v != null)))), max: Math.max(9, Math.ceil(Math.max(...sleepH.filter((v) => v != null)))), ticks: { color: C.muted, stepSize: 1, callback: (v) => v + ' h' } }) },
-plugins: { tooltip: { callbacks: { label: (c) => { const s = sleep30[c.dataIndex] || {}, sc = sleepScore(s);
-const ph = PHASES.slice(0, 3).filter(([k]) => isFinite(s[k]) && s[k] > 0).map(([k, l]) => `${l.toLowerCase()} ${hm(s[k] / 3600)}`).join(', ');
-return [` ${hm(c.raw)}${sc ? ` · score ${sc}` : ''}`, ...(ph ? [` ${ph}`] : [])]; } } } } } });
+data: { labels: slCols.map((c) => c.lbl.split(' ')), datasets: [...PHASES.map(([k, l, c]) => ({ label: l === 'Éveillé' ? 'Éveil' : l, data: slCols.map((col) => slVal(col.nights, k)), ...bar(cssColor(c)), borderRadius: 0, maxBarThickness: 18, stack: 's' })),
+...(slRest.some((v) => v != null) ? [{ label: 'Sans détail', data: slRest, ...bar(cssColor('axis')), borderRadius: 0, maxBarThickness: 18, stack: 's' }] : [])] },
+options: { interaction: hover, scales: { x: { ...scaleX(), stacked: true, ticks: { color: C.muted, autoSkip: false, maxRotation: 0, font: { size: 10 } } }, y: scaleY({ stacked: true, min: 0, ticks: { color: C.muted, stepSize: 2, callback: (v) => v + ' h' } }) },
+plugins: { tooltip: { filter: (it) => it.raw != null, callbacks: { title: (it) => { const c = slCols[it[0].dataIndex]; return c.wk ? `${c.lbl} · moyenne de ${c.nights.length} nuit${c.nights.length > 1 ? 's' : ''}` : c.lbl; },
+label: (c) => (c.raw == null ? null : ` ${c.dataset.label} ${hm(c.raw)}`),
+footer: (it) => { const c = slCols[it[0].dataIndex], t = c.nights.filter((n) => n.sleepTimeSeconds), sc = avg(c.nights.map(sleepScore).filter(Boolean));
+return t.length ? `Sommeil ${hm(avg(t.map((n) => n.sleepTimeSeconds / 3600)))}${isFinite(sc) ? ` · score ${fmt0(sc)}` : ''}` : ''; } } } } } });
 };
 const recoveryEl = document.getElementById('recovery');
 if (window.Course) window.Course.mount(document.getElementById('course'), { key: 'course', raceKm: R.distanceKm, raceName: R.name });
@@ -1085,6 +1140,33 @@ const list = (Array.isArray(gpUser) ? gpUser : []).filter((x) => x[0] !== d); li
 try { localStorage.setItem('gpUser', JSON.stringify(list)); } catch (err) { msg.textContent = 'Impossible d\'enregistrer (navigation privée ?).'; msg.classList.add('err'); return; }
 location.hash = '#goal'; location.reload();
 });
+// Déplacer depuis le calendrier : appui long (iPhone), ctrl-clic ou glisser-déposer (ordinateur), puis le nouveau jour.
+let calPick = null, calSkipClick = false, calTimer = null;
+const calDays = (s) => { const w = weekOfS(s), min = Math.max(0, dayIn(w, today)); return Array.from({ length: 7 }, (_, k) => k).filter((k) => k >= min && k !== dayIn(w, s.date)).map((k) => dayKey(addDays(w.monday, k))); };
+const calStart = (btn) => { const s = allSessions[Number(btn.dataset.goto)]; if (!s || !canMoveCal(s)) return;
+calPick = s; const ok = new Set(calDays(s)), month = btn.closest('.cal-month');
+app.querySelectorAll('.cal-d').forEach((c) => c.classList.toggle('drop', ok.has(c.dataset.day)));
+app.querySelectorAll('.cal-s.picked').forEach((b) => b.classList.remove('picked')); btn.classList.add('picked'); month.closest('#cal').classList.add('picking');
+const bar = app.querySelector('.cal-pick'); bar.querySelector('span').innerHTML = `Déplacer <b>${esc(s.title)}</b> : touche le nouveau jour (même semaine).`; bar.hidden = false;
+const out = app.querySelector('.cal-out'); out.hidden = true; pendingMove = null; };
+const calStop = () => { calPick = null; app.querySelectorAll('.cal-d.drop').forEach((c) => c.classList.remove('drop')); app.querySelectorAll('.cal-s.picked').forEach((b) => b.classList.remove('picked'));
+const cal = app.querySelector('#cal'); if (cal) cal.classList.remove('picking'); const bar = app.querySelector('.cal-pick'); if (bar) bar.hidden = true; };
+const calDrop = (cell) => { const s = calPick; if (!s || !cell.classList.contains('drop')) return false; const w = weekOfS(s), to = dayIn(w, new Date(cell.dataset.day + 'T12:00:00'));
+calStop(); proposeMove(s, to, app.querySelector('.cal-out')); const out = app.querySelector('.cal-out'); if (!out.hidden) out.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); return true; };
+app.addEventListener('click', (e) => { const t = e.target;
+if (calSkipClick) { calSkipClick = false; e.preventDefault(); e.stopPropagation(); return; }
+if (t.closest('[data-calcancel]')) { calStop(); e.stopPropagation(); return; }
+const cs = t.closest('.cal-s[data-calmv]');
+if (cs && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.stopPropagation(); calStart(cs); return; }
+if (calPick) { const cell = t.closest('.cal-d'); if (cell && cell.closest('#cal')) { e.preventDefault(); e.stopPropagation(); if (!calDrop(cell)) calStop(); } } }, true);
+app.addEventListener('contextmenu', (e) => { const cs = e.target.closest('.cal-s[data-calmv]'); if (cs && e.ctrlKey) e.preventDefault(); });
+app.addEventListener('touchstart', (e) => { calSkipClick = false; const cs = e.target.closest('.cal-s[data-calmv]'); if (!cs) return; clearTimeout(calTimer);
+calTimer = setTimeout(() => { calSkipClick = true; calStart(cs); if (navigator.vibrate) navigator.vibrate(15); }, 450); }, { passive: true });
+['touchend', 'touchmove', 'touchcancel'].forEach((ev) => app.addEventListener(ev, () => clearTimeout(calTimer), { passive: true }));
+app.addEventListener('dragstart', (e) => { const cs = e.target.closest && e.target.closest('.cal-s[data-calmv]'); if (!cs) return; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', cs.dataset.goto); calStart(cs); });
+app.addEventListener('dragover', (e) => { if (calPick && e.target.closest && e.target.closest('.cal-d.drop')) e.preventDefault(); });
+app.addEventListener('drop', (e) => { const cell = e.target.closest && e.target.closest('.cal-d.drop'); if (!cell) return; e.preventDefault(); calDrop(cell); });
+app.addEventListener('dragend', () => { if (calPick) setTimeout(() => { if (calPick && app.querySelector('.cal-out').hidden) calStop(); }, 50); });
 app.addEventListener('click', (e) => {
 const t = e.target;
 const nav = t.closest('[data-nav]');
@@ -1136,10 +1218,8 @@ app.querySelectorAll(`.feel-o[data-feel="${fo.dataset.feel}"]`).forEach((b) => {
 if (plan.weeks.findIndex((w) => w.sessions.includes(s)) === curWeekIdx - 1) { location.hash = '#plan'; setTimeout(() => location.reload(), 250); }
 return;
 }
-const fb = t.closest('.fit-btn');
-if (fb) {
-const s = allSessions[Number(fb.dataset.sid)];
-if (s && window.FitWorkout) window.FitWorkout.download(fitName(s), window.FitWorkout.encodeWorkout(wktName(s), s.steps));
+if (t.closest('#zipBtn')) {
+if (window.FitWorkout && weekFit.length) window.FitWorkout.download(`seances-semaine-${curWeek.index + 1}.zip`, window.FitWorkout.zip(weekFit.map((s) => ({ name: fitName(s), bytes: window.FitWorkout.encodeWorkout(wktName(s), s.steps) }))));
 return;
 }
 const tab = t.closest('.cmp-tab');
