@@ -1,8 +1,10 @@
 name: Synchro Garmin
 on:
   schedule:
-    - cron: '0 19 * * *'  # tous les jours à 9 h, heure de Polynésie (UTC-10) : données de la nuit
-    - cron: '0 6 * * *'   # tous les jours à 20 h, heure de Polynésie (UTC-10)
+    # GitHub lance ces tâches avec 40 à 80 min de retard : on vise donc plus tôt (heure de Polynésie, UTC-10).
+    - cron: '5 18 * * *'   # 8 h 05 : données de la nuit, prêtes vers 9 h
+    - cron: '35 18 * * *'  # 8 h 35 : secours si la première a trop de retard
+    - cron: '5 5 * * *'    # 19 h 05 : prêtes vers 20 h
   workflow_dispatch:
   push:
     branches: [main]
